@@ -1,38 +1,45 @@
-name: Deploy Codex to GitHub Pages
+name: Deploy Portal Fiscal to GitHub Pages
 
 on:
   push:
-    branches: [codex/create-dashboard-for-financial-data]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write   # para commitar o build na própria branch, se preferir
+  contents: read
   pages: write
   id-token: write
 
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: codex/create-dashboard-for-financial-data
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - run: npm ci
       - run: npm run build
 
-      # Opção A: commitar o build na própria branch (sobrescrevendo a raiz)
-      - name: Deploy build to branch root
-        run: |
-          cp -r dist/* .
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add .
-          git commit -m "Deploy build" || echo "No changes to commit"
-          git push
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
 
-      # Opção B (recomendado): usar ambiente de GitHub Pages com Actions
-      # mas aí você teria que mudar a fonte do Pages para "GitHub Actions"
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
