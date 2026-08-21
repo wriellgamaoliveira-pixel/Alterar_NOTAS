@@ -1,4 +1,5 @@
 import type { BKCFOPConfig, BKDocument, BKEvent, BKProduct, ParsedFiscalFile } from '@/types/bk';
+import { parseNFE } from '@/parsers/nfeParser';
 
 const digits = (value = '') => value.replace(/\D/g, '');
 const number = (value = '') => Number(value.replace(',', '.')) || 0;
@@ -70,13 +71,16 @@ export function parseBKXml(xmlContent: string, fileName: string, config: BKCFOPC
   if (!infNFe || !ide || !emit) throw new Error('Arquivo não contém uma NF-e reconhecível');
   const model = text(ide, 'mod');
   if (model !== '55') throw new Error(`Documento modelo ${model || 'desconhecido'} não é NF-e modelo 55`);
+  const fiscalNote = parseNFE(xmlContent);
 
-  const products: BKProduct[] = elements(doc, 'det').map((item) => {
+  const products: BKProduct[] = elements(doc, 'det').map((item, index) => {
     const product = first(item, 'prod');
+    const fiscal = fiscalNote.produtos[index];
     return {
       code: text(product, 'cProd'), description: text(product, 'xProd'), ncm: text(product, 'NCM'),
       cfop: digits(text(product, 'CFOP')), unit: text(product, 'uCom'), quantity: number(text(product, 'qCom')),
       unitValue: number(text(product, 'vUnCom')), totalValue: number(text(product, 'vProd')),
+      cClass: fiscal?.cClass, cest: fiscal?.cest, fiscal,
     };
   });
   const cfops = [...new Set(products.map((product) => product.cfop).filter(Boolean))];
@@ -162,6 +166,7 @@ export function parseBKXml(xmlContent: string, fileName: string, config: BKCFOPC
     invoiceDiscount: number(text(invoice, 'vDesc')),
     netInvoiceValue: number(text(invoice, 'vLiq')),
     installments,
+    rawXml: xmlContent,
   };
   return { kind: 'document', document: created };
 }

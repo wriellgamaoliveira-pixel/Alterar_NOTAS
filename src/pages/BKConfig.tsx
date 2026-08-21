@@ -35,15 +35,27 @@ export default function BKConfigPage() {
     catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível concluir a operação.'); }
   }
 
-  function save() {
+  function currentConfig() {
     const next = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, parse(value)])) as unknown as BKCFOPConfig;
+    const required = ['7501', '7504'];
+    next.remessa = next.remessa.filter((cfop) => !required.includes(cfop));
+    next['venda-interna'] = next['venda-interna'].filter((cfop) => !required.includes(cfop));
+    next.devolucao = next.devolucao.filter((cfop) => !required.includes(cfop));
+    next.exportacao = [...new Set([...next.exportacao.filter((cfop) => !required.includes(cfop)), ...required])];
+    return next;
+  }
+
+  function save() {
+    const next = currentConfig();
     const result = saveConfigAndReclassify(next, Math.min(1000, Math.max(1, days)), Math.max(0, warning));
+    if (result.ok) setValues({ remessa: serialize(next.remessa), exportacao: serialize(next.exportacao), 'venda-interna': serialize(next['venda-interna']), devolucao: serialize(next.devolucao) });
     setMessage(result.message);
   }
 
   function updatePeriod() {
-    const next = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, parse(value)])) as unknown as BKCFOPConfig;
+    const next = currentConfig();
     const result = saveConfigAndReclassify(next, Math.min(1000, Math.max(1, days)), Math.max(0, warning), from, to);
+    if (result.ok) setValues({ remessa: serialize(next.remessa), exportacao: serialize(next.exportacao), 'venda-interna': serialize(next['venda-interna']), devolucao: serialize(next.devolucao) });
     setMessage(result.message);
   }
 
@@ -60,7 +72,7 @@ export default function BKConfigPage() {
       <div className="mt-4 flex flex-wrap gap-2">
         <button disabled={storageBusy || Boolean(storageError)} onClick={() => void run(selectStorageFolder)} className="bk-button"><FolderOpen className="h-4 w-4" />Escolher pasta do BK</button>
         <button disabled={storageBusy || !folderName} onClick={() => void run(async () => (await syncStorageFolder(true)).message)} className="bk-button-secondary"><RefreshCw className={`h-4 w-4 ${storageBusy ? 'animate-spin' : ''}`} />Sincronizar agora</button>
-        <button disabled={storageBusy || !folderName} onClick={() => void run(exportPortableBackup)} className="bk-button-secondary"><Download className="h-4 w-4" />Salvar backup na pasta</button>
+        <button disabled={storageBusy || !folderName} onClick={() => void run(exportPortableBackup)} className="bk-button-secondary"><Download className="h-4 w-4" />Substituir backup na pasta</button>
         <button disabled={storageBusy || !folderName} onClick={() => void run(importPortableBackup)} className="bk-button-secondary"><Upload className="h-4 w-4" />Ler backup da pasta</button>
       </div>
       {storageError && <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{storageError}</p>}
@@ -69,7 +81,7 @@ export default function BKConfigPage() {
     <section className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
       <h2 className="text-xl font-bold text-white">Configuração CFOP</h2>
       <p className="mt-1 text-sm text-slate-400">Há uma única base central com {documents.length} nota(s). Remessa, Exportação, Venda Interna, Outras Saídas e Devolução são apenas departamentos de consulta, sem cópias da nota.</p>
-      <p className="mt-2 text-sm text-slate-400">Separe vários códigos por ponto e vírgula, vírgula ou espaço. Um CFOP só pode pertencer a uma categoria.</p>
+      <p className="mt-2 text-sm text-slate-400">Separe vários códigos por ponto e vírgula, vírgula ou espaço. Um CFOP só pode pertencer a uma categoria. Os CFOPs <strong className="text-sky-300">7501 e 7504</strong> são mantidos automaticamente em Exportação.</p>
       <div className="mt-5 grid gap-4 lg:grid-cols-2">{fields.map((field) => <label key={field.key} className="bk-label">{field.label}<span className="font-normal text-slate-500">{field.description}</span><textarea value={values[field.key]} onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))} className="bk-input min-h-24 resize-y" placeholder="6505; 6501; 5505" /></label>)}</div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
         <label className="bk-label">Prazo da remessa (dias)<input className="bk-input" type="number" min={1} max={1000} value={days} onChange={(event) => setDays(Number(event.target.value))} /></label>

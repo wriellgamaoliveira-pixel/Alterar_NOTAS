@@ -1,8 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useModule } from '@/context/ModuleContext';
 import { processXmlFile } from '@/parsers/zipProcessor';
 import UploadDropzone from '@/components/shared/UploadDropzone';
 import type { NotaFiscal } from '@/types/fiscal';
+import { useBK } from '@/context/BKContext';
+import { bkDocumentsToNotas } from '@/services/bkFiscalAdapter';
 import {
   Building2,
   User,
@@ -13,7 +15,11 @@ import {
 
 export default function NotaUnica() {
   const { activeModule } = useModule();
-  const [nota, setNota] = useState<NotaFiscal | null>(null);
+  const { documents } = useBK();
+  const [notaAvulsa, setNota] = useState<NotaFiscal | null>(null);
+  const [selectedKey, setSelectedKey] = useState('');
+  const centralNotas = useMemo(() => activeModule === 'nfe' ? bkDocumentsToNotas(documents) : [], [activeModule, documents]);
+  const nota = notaAvulsa || centralNotas.find((item) => item.chave === selectedKey) || centralNotas[0] || null;
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
@@ -54,8 +60,10 @@ export default function NotaUnica() {
     <div className="mx-auto max-w-[1200px] px-6 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[#f1f5f9]">Nota Única</h1>
-        <p className="text-sm text-[#94a3b8]">Visualize os detalhes de uma nota fiscal individual</p>
+        <p className="text-sm text-[#94a3b8]">Visualize uma nota já importada na base central, sem carregar o XML novamente.</p>
       </div>
+
+      {centralNotas.length > 0 && <label className="mb-5 block text-sm text-[#94a3b8]">Nota da base central<select value={notaAvulsa ? '' : (nota?.chave || '')} onChange={(event) => { setNota(null); setSelectedKey(event.target.value); }} className="mt-2 w-full rounded-lg border border-[#334155] bg-[#1e293b] px-3 py-2 text-[#f1f5f9]"><option value="" disabled>Selecione uma nota</option>{centralNotas.map((item) => <option key={item.chave || `${item.numero}-${item.serie}`} value={item.chave}>{item.numero} — {item.emitente.nome}</option>)}</select></label>}
 
       {!nota && (
         <UploadDropzone
@@ -87,10 +95,10 @@ export default function NotaUnica() {
               Nota Fiscal {nota.numero} - Série {nota.serie}
             </h2>
             <button
-              onClick={() => { setNota(null); setError(''); }}
+              onClick={() => { setNota(null); setError(''); setSelectedKey(''); }}
               className="rounded-lg border border-[#334155] bg-[#1e293b] px-4 py-2 text-sm text-[#f1f5f9] transition-colors hover:bg-[#334155]"
             >
-              Nova Consulta
+              Voltar à base central
             </button>
           </div>
 

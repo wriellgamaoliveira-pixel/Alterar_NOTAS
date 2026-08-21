@@ -13,6 +13,8 @@ import {
   AlertCircle,
   CheckCircle,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { useBK } from '@/context/BKContext';
 
 type OpType = 'cclass' | 'descricao' | 'remover-icms' | 'remover-cclass';
 
@@ -24,8 +26,24 @@ interface OpState {
   error?: string;
 }
 
+function OpCard({ tipo, title, icon: Icon, children, onProcess, state, centralCount, onCentral, onDownload }: {
+  tipo: OpType; title: string; icon: LucideIcon; children: React.ReactNode; onProcess: (files: File[]) => void;
+  state: OpState; centralCount: number; onCentral: () => void; onDownload: (tipo: OpType) => void;
+}) {
+  return <div className="space-y-4"><div className="rounded-xl border border-[#334155] bg-[#1e293b] p-5">
+    <div className="mb-4 flex items-center gap-2"><Icon className="h-5 w-5 text-[#38bdf8]" /><h3 className="font-semibold text-[#f1f5f9]">{title}</h3></div>
+    {children}
+    <div className="mt-4"><button disabled={!centralCount} onClick={onCentral} className="mb-3 flex items-center gap-2 rounded-lg bg-[#38bdf8] px-4 py-2 text-sm font-medium text-[#0f172a] disabled:cursor-not-allowed disabled:opacity-40">Usar {centralCount} XML(s) da base central</button><UploadDropzone onFilesSelected={onProcess} accept=".zip" label="Arraste o ZIP com XMLs aqui" sublabel="Arquivos serão processados e modificados" /></div>
+    {state.status === 'processing' && <div className="mt-4"><ProgressBar progress={state.progress} message={state.message} status="processing" /></div>}
+    {state.status === 'completed' && <div className="mt-4 space-y-2"><div className="flex items-center gap-2 text-sm text-[#22c55e]"><CheckCircle className="h-4 w-4" /><span>{state.message}</span></div><button onClick={() => onDownload(tipo)} className="flex items-center gap-2 rounded-lg bg-[#22c55e] px-4 py-2 text-sm font-medium text-white hover:bg-[#16a34a]"><Download className="h-4 w-4" /> Baixar ZIP Modificado</button></div>}
+    {state.status === 'error' && <div className="mt-4 flex items-center gap-2 text-sm text-[#ef4444]"><AlertCircle className="h-4 w-4" /><span>{state.error}</span></div>}
+  </div></div>;
+}
+
 export default function AlteracaoLote() {
   const { activeModule } = useModule();
+  const { documents } = useBK();
+  const centralXmls = documents.filter((document) => document.rawXml);
 
   const [opStates, setOpStates] = useState<Record<OpType, OpState>>({
     'cclass': { status: 'idle', progress: 0, message: '' },
@@ -216,53 +234,19 @@ export default function AlteracaoLote() {
     saveAs(blob, `alteracao_${tipo}_${activeModule}_${new Date().toISOString().split('T')[0]}.zip`);
   };
 
-  const OpCard = ({ tipo, title, icon: Icon, children, onProcess }: {
-    tipo: OpType; title: string; icon: any; children: React.ReactNode; onProcess: (files: File[]) => void;
-  }) => {
-    const state = opStates[tipo];
-    return (
-      <div className="space-y-4">
-        <div className="rounded-xl border border-[#334155] bg-[#1e293b] p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Icon className="h-5 w-5 text-[#38bdf8]" />
-            <h3 className="font-semibold text-[#f1f5f9]">{title}</h3>
-          </div>
-          {children}
-          <div className="mt-4">
-            <UploadDropzone onFilesSelected={onProcess} accept=".zip" label="Arraste o ZIP com XMLs aqui" sublabel="Arquivos serão processados e modificados" />
-          </div>
-          {state.status === 'processing' && (
-            <div className="mt-4">
-              <ProgressBar progress={state.progress} message={state.message} status="processing" />
-            </div>
-          )}
-          {state.status === 'completed' && (
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center gap-2 text-sm text-[#22c55e]">
-                <CheckCircle className="h-4 w-4" />
-                <span>{state.message}</span>
-              </div>
-              <button onClick={() => baixarResultado(tipo)} className="flex items-center gap-2 rounded-lg bg-[#22c55e] px-4 py-2 text-sm font-medium text-white hover:bg-[#16a34a]">
-                <Download className="h-4 w-4" /> Baixar ZIP Modificado
-              </button>
-            </div>
-          )}
-          {state.status === 'error' && (
-            <div className="mt-4 flex items-center gap-2 text-sm text-[#ef4444]">
-              <AlertCircle className="h-4 w-4" />
-              <span>{state.error}</span>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+  const processarBaseCentral = async (onProcess: (files: File[]) => void) => {
+    if (!centralXmls.length) return;
+    const zip = new JSZip();
+    centralXmls.forEach((document) => zip.file(document.sourceFile.split('/').pop() || `${document.accessKey}.xml`, document.rawXml!));
+    const blob = await zip.generateAsync({ type: 'blob' });
+    onProcess([new File([blob], 'base-central.zip', { type: 'application/zip' })]);
   };
 
   return (
     <div className="mx-auto max-w-[1000px] px-6 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[#f1f5f9]">Alteração em Lote</h1>
-        <p className="text-sm text-[#94a3b8]">Modifique XMLs em massa sem alterar o banco de dados</p>
+        <p className="text-sm text-[#94a3b8]">Use diretamente os XMLs já importados na base central; o resultado modificado é baixado sem alterar o banco.</p>
       </div>
 
       <Tabs defaultValue="cclass" className="w-full">
@@ -282,7 +266,7 @@ export default function AlteracaoLote() {
         </TabsList>
 
         <TabsContent value="cclass">
-          <OpCard tipo="cclass" title="Alterar por cClass/CFOP" icon={Tag} onProcess={processarCClassCFOP}>
+          <OpCard tipo="cclass" title="Alterar por cClass/CFOP" icon={Tag} onProcess={processarCClassCFOP} state={opStates.cclass} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarCClassCFOP)} onDownload={baixarResultado}>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs text-[#94a3b8]">cClass Origem</label>
@@ -305,7 +289,7 @@ export default function AlteracaoLote() {
         </TabsContent>
 
         <TabsContent value="descricao">
-          <OpCard tipo="descricao" title="Alterar por Descrição" icon={FileText} onProcess={processarDescricao}>
+          <OpCard tipo="descricao" title="Alterar por Descrição" icon={FileText} onProcess={processarDescricao} state={opStates.descricao} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarDescricao)} onDownload={baixarResultado}>
             <div className="mb-4">
               <label className="mb-2 block text-sm text-[#94a3b8]">CSV de Mapeamento (descrição original ; nova descrição)</label>
               <UploadDropzone onFilesSelected={handleCsvUpload} accept=".csv" label="Arraste o CSV de mapeamento" sublabel="Formato: descrição original ; nova descrição" />
@@ -317,7 +301,7 @@ export default function AlteracaoLote() {
         </TabsContent>
 
         <TabsContent value="remover-icms">
-          <OpCard tipo="remover-icms" title="Remover CFOP por ICMS" icon={Trash2} onProcess={processarRemoverICMS}>
+          <OpCard tipo="remover-icms" title="Remover CFOP por ICMS" icon={Trash2} onProcess={processarRemoverICMS} state={opStates['remover-icms']} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarRemoverICMS)} onDownload={baixarResultado}>
             <div>
               <label className="mb-1 block text-xs text-[#94a3b8]">Alíquota ICMS (%)</label>
               <input type="number" step="0.01" value={aliquotaICMS} onChange={e => setAliquotaICMS(e.target.value)} placeholder="Ex: 18.00" className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-sm text-[#f1f5f9] placeholder-[#475569] focus:border-[#38bdf8] focus:outline-none" />
@@ -327,7 +311,7 @@ export default function AlteracaoLote() {
         </TabsContent>
 
         <TabsContent value="remover-cclass">
-          <OpCard tipo="remover-cclass" title="Remover CFOP por cClass" icon={Trash2} onProcess={processarRemoverCClass}>
+          <OpCard tipo="remover-cclass" title="Remover CFOP por cClass" icon={Trash2} onProcess={processarRemoverCClass} state={opStates['remover-cclass']} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarRemoverCClass)} onDownload={baixarResultado}>
             <div>
               <label className="mb-1 block text-xs text-[#94a3b8]">cClass Alvo</label>
               <input type="text" value={cClassAlvo} onChange={e => setCClassAlvo(e.target.value)} placeholder="Ex: SERVICO" className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-sm text-[#f1f5f9] placeholder-[#475569] focus:border-[#38bdf8] focus:outline-none" />

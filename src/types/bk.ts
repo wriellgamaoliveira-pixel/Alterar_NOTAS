@@ -31,6 +31,9 @@ export interface BKProduct {
   quantity: number;
   unitValue: number;
   totalValue: number;
+  cClass?: string;
+  cest?: string;
+  fiscal?: import('@/types/fiscal').Produto;
 }
 
 export interface BKInstallment {
@@ -100,6 +103,7 @@ export interface BKDocument {
   installments: BKInstallment[];
   shipmentId?: string;
   manual?: boolean;
+  rawXml?: string;
 }
 
 export interface ParsedEvent {
@@ -169,7 +173,7 @@ export const DEFAULT_UNITS: BKUnit[] = [
 
 export const DEFAULT_CFOP_CONFIG: BKCFOPConfig = {
   remessa: ['5501', '5502', '5504', '5505', '6501', '6502', '6504', '6505'],
-  exportacao: ['7101', '7102', '7105', '7106', '7127'],
+  exportacao: ['7101', '7102', '7105', '7106', '7127', '7501', '7504'],
   'venda-interna': ['5101', '5102', '6101', '6102'],
   devolucao: ['1201', '1202', '2201', '2202', '5201', '5202', '6201', '6202'],
 };

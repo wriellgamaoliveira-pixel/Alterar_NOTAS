@@ -5,6 +5,7 @@ import UploadDropzone from '@/components/shared/UploadDropzone';
 import ProgressBar from '@/components/shared/ProgressBar';
 import { useModule } from '@/context/ModuleContext';
 import { AlertCircle, CheckCircle, Download } from 'lucide-react';
+import { useBK } from '@/context/BKContext';
 
 type Status = 'idle' | 'processing' | 'completed' | 'error';
 
@@ -27,6 +28,7 @@ function extractIE(xmlContent: string): string {
 
 export default function ExportarXmlPorIE() {
   const { activeModule } = useModule();
+  const { documents } = useBK();
   const [status, setStatus] = useState<Status>('idle');
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState('');
@@ -100,6 +102,15 @@ export default function ExportarXmlPorIE() {
     }
   }, [activeModule]);
 
+  const processarBaseCentral = useCallback(async () => {
+    const savedXmls = documents.filter((document) => document.rawXml);
+    if (!savedXmls.length) { setStatus('error'); setError('As notas antigas ainda não possuem o XML completo. Clique em Sincronizar agora na configuração BK para atualizar a base uma única vez.'); return; }
+    const source = new JSZip();
+    savedXmls.forEach((document) => source.file(document.sourceFile.split('/').pop() || `${document.accessKey}.xml`, document.rawXml!));
+    const blob = await source.generateAsync({ type: 'blob' });
+    await processarZip([new File([blob], 'base-central.zip', { type: 'application/zip' })]);
+  }, [documents, processarZip]);
+
   const baixarZip = () => {
     if (!resultBlob) return;
     saveAs(resultBlob, 'exportacao_xml_por_ie.zip');
@@ -122,6 +133,7 @@ export default function ExportarXmlPorIE() {
       )}
 
       <div className="rounded-xl border border-[#334155] bg-[#1e293b] p-5">
+        <button disabled={!moduloValido || !documents.length} onClick={() => void processarBaseCentral()} className="mb-4 flex items-center gap-2 rounded-lg bg-[#38bdf8] px-4 py-2 text-sm font-medium text-[#0f172a] disabled:cursor-not-allowed disabled:opacity-40">Usar {documents.length} nota(s) da base central</button>
         <UploadDropzone
           onFilesSelected={processarZip}
           accept=".zip"

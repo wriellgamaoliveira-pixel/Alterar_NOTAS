@@ -44,11 +44,25 @@ const emptyState = (): BKStoredState => ({
   deadlineDays: 180, warningDays: 30, autoSyncMinutes: 5, knownFiles: {},
 });
 
+function withRequiredExportCFOPs(config: BKCFOPConfig): BKCFOPConfig {
+  const forcedExports = ['7501', '7504'];
+  return {
+    remessa: config.remessa.filter((cfop) => !forcedExports.includes(cfop)),
+    exportacao: [...new Set([...config.exportacao.filter((cfop) => !forcedExports.includes(cfop)), ...forcedExports])],
+    'venda-interna': config['venda-interna'].filter((cfop) => !forcedExports.includes(cfop)),
+    devolucao: config.devolucao.filter((cfop) => !forcedExports.includes(cfop)),
+  };
+}
+
 function normalizeState(value?: Partial<BKStoredState>): BKStoredState {
+  const config = withRequiredExportCFOPs(value?.config || DEFAULT_CFOP_CONFIG);
+  const documents = Array.isArray(value?.documents)
+    ? value.documents.map((document) => ({ ...document, category: classifyCFOP(document.cfops, config) }))
+    : [];
   return {
     ...emptyState(), ...value,
-    documents: Array.isArray(value?.documents) ? value.documents : [],
-    config: value?.config || DEFAULT_CFOP_CONFIG,
+    documents,
+    config,
     units: Array.isArray(value?.units) ? value.units : DEFAULT_UNITS,
     knownFiles: value?.knownFiles || {},
     autoSyncMinutes: Number(value?.autoSyncMinutes) >= 1 ? Number(value?.autoSyncMinutes) : 5,
@@ -169,12 +183,13 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const saveConfigAndReclassify = useCallback<BKContextValue['saveConfigAndReclassify']>((config, deadlineDays, warningDays, from, to) => {
-    const validation = validateCFOPConfig(config);
+    const normalizedConfig = withRequiredExportCFOPs(config);
+    const validation = validateCFOPConfig(normalizedConfig);
     if (validation) return { ok: false, message: validation, count: 0 };
     const current = stateRef.current;
-    const result = reclassifyDocuments(current.documents, config, from, to);
+    const result = reclassifyDocuments(current.documents, normalizedConfig, from, to);
     if (result.blocked) return { ok: false, message: 'Atualização bloqueada: uma nota vinculada a embarque deixaria de ser Exportação.', count: 0 };
-    const next = { ...current, config, deadlineDays, warningDays, documents: result.classified };
+    const next = { ...current, config: normalizedConfig, deadlineDays, warningDays, documents: result.classified };
     setState(next); stateRef.current = next;
     return { ok: true, message: `Configuração salva. ${result.count} nota(s) mudaram de departamento sem nova importação.`, count: result.count };
   }, []);
@@ -229,7 +244,7 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
     const handle = await loadDirectoryHandle();
     if (!handle || !await ensureDirectoryPermission(handle, true)) throw new Error('Selecione e autorize a pasta primeiro.');
     await writePortableBackup(handle, stateRef.current);
-    return `Backup atualizado em ${handle.name}/bk-documentos.json.`;
+    return `Backup anterior substituído e gravação confirmada em ${handle.name}/bk-documentos.json.`;
   }, []);
 
   const importPortableBackup = useCallback(async () => {
@@ -256,7 +271,7 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo(() => ({ ...state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes }),
     [state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes]);
-  return <BKContext.Provider value={value}>{children}</BKContext.Provider>;
+  return <BKContext.Provider value={value}>{storageReady ? children : <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">Abrindo a base central de documentos…</div>}</BKContext.Provider>;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

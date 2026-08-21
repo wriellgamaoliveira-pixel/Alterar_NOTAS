@@ -15,7 +15,7 @@ type PortableDirectoryHandle = FileSystemDirectoryHandle & {
 };
 
 type WritableFileHandle = FileSystemFileHandle & {
-  createWritable: () => Promise<{ write: (data: string) => Promise<void>; close: () => Promise<void> }>;
+  createWritable: (options?: { keepExistingData?: boolean }) => Promise<{ write: (data: string) => Promise<void>; truncate: (size: number) => Promise<void>; close: () => Promise<void> }>;
 };
 
 declare global {
@@ -76,9 +76,13 @@ export async function ensureDirectoryPermission(handle: FileSystemDirectoryHandl
 
 export async function writePortableBackup(handle: FileSystemDirectoryHandle, state: BKStoredState) {
   const fileHandle = await handle.getFileHandle(BACKUP_FILE_NAME, { create: true }) as WritableFileHandle;
-  const writable = await fileHandle.createWritable();
-  await writable.write(JSON.stringify({ format: 'BK_DOCUMENTOS', exportedAt: new Date().toISOString(), state }, null, 2));
+  const serialized = JSON.stringify({ format: 'BK_DOCUMENTOS', exportedAt: new Date().toISOString(), state }, null, 2);
+  const writable = await fileHandle.createWritable({ keepExistingData: false });
+  await writable.truncate(0);
+  await writable.write(serialized);
   await writable.close();
+  const saved = await (await fileHandle.getFile()).text();
+  if (saved !== serialized) throw new Error('O backup não pôde ser confirmado após a gravação.');
 }
 
 export async function readPortableBackup(handle: FileSystemDirectoryHandle): Promise<BKStoredState | undefined> {
@@ -104,7 +108,7 @@ export async function listChangedXmlFiles(handle: FileSystemDirectoryHandle, kno
       if (entry.kind === 'directory') await walk(entry as FileSystemDirectoryHandle, path);
       else if (name.toLowerCase().endsWith('.xml')) {
         const file = await (entry as FileSystemFileHandle).getFile();
-        const fingerprint = `${file.size}:${file.lastModified}`;
+        const fingerprint = `parser-v2:${file.size}:${file.lastModified}`;
         discovered[path] = fingerprint;
         if (knownFiles[path] !== fingerprint) changed.push({ path, file, fingerprint });
       }

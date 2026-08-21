@@ -16,10 +16,15 @@ import {
 } from 'lucide-react';
 import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
+import { useBK } from '@/context/BKContext';
+import { bkDocumentsToNotas } from '@/services/bkFiscalAdapter';
 
 export default function ResumoImposto() {
   const { activeModule } = useModule();
-  const [notas, setNotas] = useState<NotaFiscal[]>([]);
+  const { documents } = useBK();
+  const [uploadedNotas, setUploadedNotas] = useState<NotaFiscal[]>([]);
+  const centralNotas = useMemo(() => activeModule === 'nfe' ? bkDocumentsToNotas(documents) : [], [activeModule, documents]);
+  const notas = centralNotas.length ? centralNotas : uploadedNotas;
   const [progress, setProgress] = useState<{ current: number; total: number; message: string; status: 'idle' | 'processing' | 'completed' | 'error' }>({ current: 0, total: 0, message: '', status: 'idle' });
   const [filter, setFilter] = useState('');
 
@@ -34,7 +39,7 @@ export default function ResumoImposto() {
       const result = await processZipFile(zipFile, activeModule, (current, total, message) => {
         setProgress({ current, total, message, status: 'idle' });
       });
-      setNotas(result.notas);
+      setUploadedNotas(result.notas);
       setProgress({ current: result.processedFiles, total: result.totalFiles, message: 'Concluido!', status: 'completed' as const });
     } catch (err) {
       setProgress({ current: 0, total: 0, message: (err as Error).message, status: 'idle' });
@@ -137,7 +142,7 @@ export default function ResumoImposto() {
       <div className="mx-auto max-w-[1200px] px-6 py-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-[#f1f5f9]">Relatório por Imposto</h1>
-          <p className="text-sm text-[#94a3b8]">Faça upload de um ZIP com XMLs para análise fiscal</p>
+          <p className="text-sm text-[#94a3b8]">A base central ainda não possui notas deste módulo.</p>
         </div>
         <UploadDropzone onFilesSelected={handleFiles} accept=".zip" label="Arraste um ZIP com XMLs aqui" sublabel="XMLs fiscais compactados em ZIP" />
         {progress.total > 0 && (
@@ -154,7 +159,7 @@ export default function ResumoImposto() {
       <div className="mb-6 flex items-center justify-between print:hidden">
         <div>
           <h1 className="text-2xl font-bold text-[#f1f5f9]">Relatório por Imposto</h1>
-          <p className="text-sm text-[#94a3b8]">{notas.length} notas processadas</p>
+          <p className="text-sm text-[#94a3b8]">{notas.length} notas da {centralNotas.length ? 'base central' : 'importação avulsa'}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => window.print()} className="flex items-center gap-2 rounded-lg border border-[#334155] bg-[#1e293b] px-4 py-2 text-sm text-[#f1f5f9] hover:bg-[#334155]">
@@ -163,9 +168,7 @@ export default function ResumoImposto() {
           <button onClick={exportCSV} className="flex items-center gap-2 rounded-lg bg-[#38bdf8] px-4 py-2 text-sm font-medium text-[#0f172a] hover:bg-[#0ea5e9]">
             <Download className="h-4 w-4" /> Export CSV
           </button>
-          <button onClick={() => setNotas([])} className="flex items-center gap-2 rounded-lg border border-[#334155] bg-[#1e293b] px-4 py-2 text-sm text-[#f1f5f9] hover:bg-[#334155]">
-            Novo Upload
-          </button>
+          {!centralNotas.length && <button onClick={() => setUploadedNotas([])} className="flex items-center gap-2 rounded-lg border border-[#334155] bg-[#1e293b] px-4 py-2 text-sm text-[#f1f5f9] hover:bg-[#334155]">Novo Upload</button>}
         </div>
       </div>
 
