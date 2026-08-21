@@ -16,6 +16,20 @@ Sistema web para processamento, visualizacao e alteracao de notas fiscais eletro
 | **Relatorio CST** | Disponivel para NF-e e NFC-e - analise detalhada por CST ICMS com itens flat |
 | **Alteracao em Lote** | 4 operacoes para modificar XMLs em massa: cClass/CFOP, descricao, remover CFOP por ICMS, remover CFOP por cClass |
 | **Exportacao CSV** | Todos os relatorios exportam CSV com BOM UTF-8 e delimitador `;` (compativel Excel BR) |
+| **BK — Documentos Fiscais** | Importacao segura de NF-e/eventos, classificacao CFOP, remessa x exportacao, historico, DANFE e Excel |
+
+### BK — Documentos Fiscais (v1.34)
+
+O menu **BK Documentos** centraliza NF-e de remessa, exportacao, venda interna,
+outras saidas e devolucao. A importacao possui previa obrigatoria, filtro por
+periodo, leitura recursiva de pasta autorizada pelo navegador, conferencia de
+unidade emitente, prevencao de duplicidade e atualizacao posterior por eventos
+de cancelamento. Os dados ficam no armazenamento local versionado do navegador;
+nenhum XML e enviado para servicos externos.
+
+> Esta distribuicao e estatica (GitHub Pages) e nao possui banco multiusuario.
+> O estado BK foi isolado em `BKContext` para permitir a troca futura por uma
+> API do sistema Fechamento sem alterar o parser nem as telas.
 
 ---
 

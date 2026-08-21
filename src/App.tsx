@@ -9,13 +9,19 @@ import AlteracaoLote from '@/pages/AlteracaoLote';
 import RelatorioCST from '@/pages/RelatorioCST';
 import ExportarXmlPorIE from '@/pages/ExportarXmlPorIE';
 import DashboardApuracao from '@/pages/DashboardApuracao';
+import { BKProvider } from '@/context/BKContext';
+import BKShell from '@/components/shared/BKShell';
+import BKImport from '@/pages/BKImport';
+import BKDocuments from '@/pages/BKDocuments';
+import BKConfigPage from '@/pages/BKConfig';
 
 function App() {
   return (
     <ModuleProvider>
-      <div className="min-h-screen bg-[#0f172a]">
-        <Navbar />
-        <main>
+      <BKProvider>
+        <div className="min-h-screen bg-[#0f172a]">
+          <Navbar />
+          <main>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/nota-unica" element={<NotaUnica />} />
@@ -26,9 +32,16 @@ function App() {
             <Route path="/apuracao" element={<DashboardApuracao />} />
             <Route path="/nfe/exportar-xml-por-ie" element={<ExportarXmlPorIE />} />
             <Route path="/nfce/exportar-xml-por-ie" element={<ExportarXmlPorIE />} />
+            <Route path="/bk" element={<BKShell />}>
+              <Route index element={<BKImport />} />
+              <Route path="importacao" element={<BKImport />} />
+              <Route path=":category" element={<BKDocuments />} />
+              <Route path="configuracao" element={<BKConfigPage />} />
+            </Route>
           </Routes>
-        </main>
-      </div>
+          </main>
+        </div>
+      </BKProvider>
     </ModuleProvider>
   );
 }

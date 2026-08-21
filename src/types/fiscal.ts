@@ -9,9 +9,9 @@ export interface ModuleConfig {
 }
 
 export const MODULES: ModuleConfig[] = [
-  { id: 'nfcom', name: 'NFCom', description: 'Nota Fiscal de Comunicação', model: '62', color: '#8b5cf6' },
   { id: 'nfe', name: 'NF-e', description: 'Nota Fiscal Eletrônica', model: '55', color: '#38bdf8' },
   { id: 'nfce', name: 'NFC-e', description: 'Nota Fiscal Consumidor', model: '65', color: '#22c55e' },
+  { id: 'nfcom', name: 'NFCom', description: 'Nota Fiscal de Comunicação', model: '62', color: '#8b5cf6' },
   { id: 'nfse', name: 'NFS-e', description: 'Nota Fiscal Serviços', model: '', color: '#f59e0b' },
 ];
 

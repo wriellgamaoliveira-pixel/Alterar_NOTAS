@@ -1,6 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useModule } from '@/context/ModuleContext';
-import { MODULES } from '@/types/fiscal';
+import { MODULES, type FiscalModule } from '@/types/fiscal';
 import {
   Home,
   FileText,
@@ -9,6 +9,7 @@ import {
   Edit3,
   FileSpreadsheet,
   FolderTree,
+  Landmark,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -32,7 +33,7 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[#334155] bg-[#0f172a]/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-[1440px] items-center justify-between px-6 py-3">
+      <div className="mx-auto flex max-w-[1900px] flex-wrap items-center justify-between gap-2 px-3 py-3 sm:px-6">
         <div className="flex items-center gap-3">
           <div
             className="flex cursor-pointer items-center gap-2"
@@ -56,6 +57,12 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => navigate('/bk/importacao')}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-all ${location.pathname.startsWith('/bk') ? 'bg-sky-500/15 text-sky-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            <Landmark className="h-4 w-4" /><span>BK Documentos</span>
+          </button>
           {navLinks.map(link => {
             const isActive = location.pathname === link.path;
             return (
@@ -89,7 +96,7 @@ export default function Navbar() {
           )}
 
           <div className="ml-3 border-l border-[#334155] pl-3">
-            <Select value={activeModule} onValueChange={(v) => setActiveModule(v as any)}>
+            <Select value={activeModule} onValueChange={(v) => setActiveModule(v as FiscalModule)}>
               <SelectTrigger className="h-9 w-[140px] border-[#334155] bg-[#1e293b] text-[#f1f5f9]">
                 <SelectValue />
               </SelectTrigger>
