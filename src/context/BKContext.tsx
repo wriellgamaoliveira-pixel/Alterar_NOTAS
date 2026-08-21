@@ -26,11 +26,10 @@ interface BKContextValue extends BKStoredState {
   storageReady: boolean;
   storageBusy: boolean;
   storageError?: string;
-  saveConfig: (config: BKCFOPConfig, deadlineDays: number, warningDays: number) => { ok: boolean; message: string };
+  saveConfigAndReclassify: (config: BKCFOPConfig, deadlineDays: number, warningDays: number, from?: string, to?: string) => { ok: boolean; message: string; count: number };
   importBatch: (documents: BKDocument[], events: Array<{ accessKey: string; event: BKEvent }>) => { imported: number; updated: number };
   saveDocument: (document: BKDocument) => void;
   deleteDocuments: (ids: string[]) => { ok: boolean; message: string };
-  reclassify: (from?: string, to?: string) => { ok: boolean; message: string; count: number };
   selectStorageFolder: () => Promise<string>;
   syncStorageFolder: (requestPermission?: boolean) => Promise<BKSyncResult>;
   exportPortableBackup: () => Promise<string>;
@@ -66,6 +65,27 @@ function eventStatus(events: BKEvent[], fallback: BKDocument['fiscalStatus']) {
   if (ordered.some((event) => event.type === 'cancelamento' && (!event.sefazCode || ['101', '135', '155'].includes(event.sefazCode)))) return 'cancelada';
   if (ordered.some((event) => event.type === 'autorizacao' && (!event.sefazCode || ['100', '150'].includes(event.sefazCode)))) return 'autorizada';
   return fallback;
+}
+
+function validateCFOPConfig(config: BKCFOPConfig) {
+  const seen = new Map<string, string>();
+  for (const [category, values] of Object.entries(config)) for (const value of values) {
+    if (seen.has(value)) return `CFOP ${value} repetido em ${seen.get(value)} e ${category}.`;
+    seen.set(value, category);
+  }
+  return '';
+}
+
+function reclassifyDocuments(documents: BKDocument[], config: BKCFOPConfig, from?: string, to?: string) {
+  const classified = documents.map((document) => {
+    const documentDate = document.issueDate.slice(0, 10);
+    if ((from && documentDate < from) || (to && documentDate > to)) return document;
+    return { ...document, category: classifyCFOP(document.cfops, config) };
+  });
+  const blocked = classified.some((document, index) =>
+    documents[index].category === 'exportacao' && document.category !== 'exportacao' && document.shipmentId);
+  const count = classified.filter((document, index) => document.category !== documents[index].category).length;
+  return { classified, blocked, count };
 }
 
 function mergeFiscalData(current: BKDocument[], incomingDocuments: BKDocument[], incomingEvents: Array<{ accessKey: string; event: BKEvent }>) {
@@ -148,28 +168,15 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, message: 'Documento(s) excluído(s).' };
   }, []);
 
-  const saveConfig = useCallback<BKContextValue['saveConfig']>((config, deadlineDays, warningDays) => {
-    const seen = new Map<string, string>();
-    for (const [category, values] of Object.entries(config)) for (const value of values) {
-      if (seen.has(value)) return { ok: false, message: `CFOP ${value} repetido em ${seen.get(value)} e ${category}.` };
-      seen.set(value, category);
-    }
-    setState((current) => ({ ...current, config, deadlineDays, warningDays }));
-    return { ok: true, message: 'Configuração salva. Use reclassificar para atualizar o histórico.' };
-  }, []);
-
-  const reclassify = useCallback<BKContextValue['reclassify']>((from, to) => {
+  const saveConfigAndReclassify = useCallback<BKContextValue['saveConfigAndReclassify']>((config, deadlineDays, warningDays, from, to) => {
+    const validation = validateCFOPConfig(config);
+    if (validation) return { ok: false, message: validation, count: 0 };
     const current = stateRef.current;
-    const changes = current.documents.map((document) => {
-      const documentDate = document.issueDate.slice(0, 10);
-      if ((from && documentDate < from) || (to && documentDate > to)) return document;
-      return { ...document, category: classifyCFOP(document.cfops, current.config) };
-    });
-    if (changes.some((document, index) => current.documents[index].category === 'exportacao' && document.category !== 'exportacao' && document.shipmentId))
-      return { ok: false, message: 'Reclassificação bloqueada: há nota de exportação vinculada a embarque.', count: 0 };
-    const count = changes.filter((document, index) => document.category !== current.documents[index].category).length;
-    setState((saved) => ({ ...saved, documents: changes }));
-    return { ok: true, message: `${count} documento(s) reclassificado(s).`, count };
+    const result = reclassifyDocuments(current.documents, config, from, to);
+    if (result.blocked) return { ok: false, message: 'Atualização bloqueada: uma nota vinculada a embarque deixaria de ser Exportação.', count: 0 };
+    const next = { ...current, config, deadlineDays, warningDays, documents: result.classified };
+    setState(next); stateRef.current = next;
+    return { ok: true, message: `Configuração salva. ${result.count} nota(s) mudaram de departamento sem nova importação.`, count: result.count };
   }, []);
 
   const selectStorageFolder = useCallback(async () => {
@@ -247,8 +254,8 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
     return () => { window.clearTimeout(initialSync); window.clearInterval(timer); };
   }, [state.autoSyncMinutes, state.folderName, storageReady, syncStorageFolder]);
 
-  const value = useMemo(() => ({ ...state, storageReady, storageBusy, storageError, saveConfig, importBatch, saveDocument, deleteDocuments, reclassify, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes }),
-    [state, storageReady, storageBusy, storageError, saveConfig, importBatch, saveDocument, deleteDocuments, reclassify, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes]);
+  const value = useMemo(() => ({ ...state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes }),
+    [state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes]);
   return <BKContext.Provider value={value}>{children}</BKContext.Provider>;
 }
 

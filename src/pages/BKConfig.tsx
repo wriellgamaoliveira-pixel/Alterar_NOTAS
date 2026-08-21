@@ -15,8 +15,8 @@ const parse = (value: string) => [...new Set(value.split(/[;,\s]+/).map((item) =
 
 export default function BKConfigPage() {
   const {
-    config, deadlineDays, warningDays, folderName, autoSyncMinutes, lastSync,
-    storageReady, storageBusy, storageError, saveConfig, reclassify, selectStorageFolder,
+    config, documents, deadlineDays, warningDays, folderName, autoSyncMinutes, lastSync,
+    storageReady, storageBusy, storageError, saveConfigAndReclassify, selectStorageFolder,
     syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes,
   } = useBK();
   const [values, setValues] = useState<Record<keyof BKCFOPConfig, string>>({
@@ -37,7 +37,13 @@ export default function BKConfigPage() {
 
   function save() {
     const next = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, parse(value)])) as unknown as BKCFOPConfig;
-    const result = saveConfig(next, Math.min(1000, Math.max(1, days)), Math.max(0, warning));
+    const result = saveConfigAndReclassify(next, Math.min(1000, Math.max(1, days)), Math.max(0, warning));
+    setMessage(result.message);
+  }
+
+  function updatePeriod() {
+    const next = Object.fromEntries(Object.entries(values).map(([key, value]) => [key, parse(value)])) as unknown as BKCFOPConfig;
+    const result = saveConfigAndReclassify(next, Math.min(1000, Math.max(1, days)), Math.max(0, warning), from, to);
     setMessage(result.message);
   }
 
@@ -62,18 +68,20 @@ export default function BKConfigPage() {
     </section>
     <section className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
       <h2 className="text-xl font-bold text-white">Configuração CFOP</h2>
-      <p className="mt-1 text-sm text-slate-400">Separe vários códigos por ponto e vírgula, vírgula ou espaço. Um CFOP só pode pertencer a uma categoria.</p>
+      <p className="mt-1 text-sm text-slate-400">Há uma única base central com {documents.length} nota(s). Remessa, Exportação, Venda Interna, Outras Saídas e Devolução são apenas departamentos de consulta, sem cópias da nota.</p>
+      <p className="mt-2 text-sm text-slate-400">Separe vários códigos por ponto e vírgula, vírgula ou espaço. Um CFOP só pode pertencer a uma categoria.</p>
       <div className="mt-5 grid gap-4 lg:grid-cols-2">{fields.map((field) => <label key={field.key} className="bk-label">{field.label}<span className="font-normal text-slate-500">{field.description}</span><textarea value={values[field.key]} onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))} className="bk-input min-h-24 resize-y" placeholder="6505; 6501; 5505" /></label>)}</div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
         <label className="bk-label">Prazo da remessa (dias)<input className="bk-input" type="number" min={1} max={1000} value={days} onChange={(event) => setDays(Number(event.target.value))} /></label>
         <label className="bk-label">Alerta antes do vencimento (dias)<input className="bk-input" type="number" min={0} max={999} value={warning} onChange={(event) => setWarning(Number(event.target.value))} /></label>
       </div>
-      <button onClick={save} className="bk-button mt-5"><Save className="h-4 w-4" />Salvar configuração</button>
+      <button onClick={save} className="bk-button mt-5"><Save className="h-4 w-4" />Salvar CFOP e atualizar todas as notas</button>
+      <p className="mt-2 text-xs text-slate-500">Exemplo: ao incluir o CFOP 7501 em Exportação, as notas já importadas mudam imediatamente para esse departamento. Não é necessário importar o XML novamente.</p>
     </section>
     <section className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
       <h2 className="font-semibold text-white">Atualização de classificação</h2><p className="mt-1 text-sm text-slate-400">Aplica a configuração vigente às notas já gravadas, sem reimportar XML.</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:max-w-xl"><label className="bk-label">Data inicial<input className="bk-input" type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label><label className="bk-label">Data final<input className="bk-input" type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label></div>
-      <button onClick={() => setMessage(reclassify(from, to).message)} className="bk-button-secondary mt-5"><RefreshCw className="h-4 w-4" />Atualizar consulta</button>
+      <button onClick={updatePeriod} className="bk-button-secondary mt-5"><RefreshCw className="h-4 w-4" />Salvar CFOP e atualizar o período</button>
     </section>
     {message && <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">{message}</div>}
     <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">CFOPs não configurados são mantidos em <strong>Outras Saídas</strong>. Notas de exportação vinculadas a embarques não podem perder essa categoria.</div>
