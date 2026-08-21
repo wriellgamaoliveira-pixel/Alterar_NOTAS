@@ -19,12 +19,16 @@ import { saveAs } from 'file-saver';
 import { useBK } from '@/context/BKContext';
 import { bkDocumentsToNotas } from '@/services/bkFiscalAdapter';
 
+const today = new Date();
+const initialPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+const finalPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+
 export default function ResumoImposto() {
   const { activeModule } = useModule();
   const { documents } = useBK();
   const [uploadedNotas, setUploadedNotas] = useState<NotaFiscal[]>([]);
   const [centralNotas, setCentralNotas] = useState<NotaFiscal[]>([]);
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); const [limit, setLimit] = useState(100);
+  const [dateFrom, setDateFrom] = useState(initialPeriod); const [dateTo, setDateTo] = useState(finalPeriod); const [limit, setLimit] = useState(100);
   const notas = centralNotas.length ? centralNotas : uploadedNotas;
   const [progress, setProgress] = useState<{ current: number; total: number; message: string; status: 'idle' | 'processing' | 'completed' | 'error' }>({ current: 0, total: 0, message: '', status: 'idle' });
   const [filter, setFilter] = useState('');
@@ -145,7 +149,7 @@ export default function ResumoImposto() {
           <h1 className="text-2xl font-bold text-[#f1f5f9]">Relatório por Imposto</h1>
           <p className="text-sm text-[#94a3b8]">A base central ainda não possui notas deste módulo.</p>
         </div>
-        <div className="mb-5 grid gap-3 rounded-xl border border-sky-500/30 bg-[#1e293b] p-4 sm:grid-cols-[200px_180px_auto]"><label className="text-xs text-[#94a3b8]">Mês de emissão<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Quantidade<select value={limit} onChange={(event) => setLimit(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white">{[10,20,50,100,200,500,1000,2000,5000].map((value) => <option key={value}>{value}</option>)}</select></label><button onClick={() => setCentralNotas(bkDocumentsToNotas(documents.filter((item) => activeModule === 'nfe' && (!month || item.issueDate.startsWith(month))).slice(0, limit)))} className="self-end rounded-lg bg-[#38bdf8] px-4 py-2 font-semibold text-[#0f172a]">Buscar no banco de dados</button></div>
+        <div className="mb-5 grid gap-3 rounded-xl border border-sky-500/30 bg-[#1e293b] p-4 sm:grid-cols-[180px_180px_180px_auto]"><label className="text-xs text-[#94a3b8]">Data inicial<input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Data final<input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Quantidade na tela<select value={limit} onChange={(event) => setLimit(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white">{[10,20,50,100,200,500,1000,2000,5000].map((value) => <option key={value}>{value}</option>)}</select></label><button onClick={() => setCentralNotas(bkDocumentsToNotas(documents.filter((item) => { const issueDay = item.issueDate.slice(0, 10); return activeModule === 'nfe' && (!dateFrom || issueDay >= dateFrom) && (!dateTo || issueDay <= dateTo); }).slice(0, limit)))} className="self-end rounded-lg bg-[#38bdf8] px-4 py-2 font-semibold text-[#0f172a]">Buscar no banco de dados</button></div>
         <UploadDropzone onFilesSelected={handleFiles} accept=".zip" label="Arraste um ZIP com XMLs aqui" sublabel="XMLs fiscais compactados em ZIP" />
         {progress.total > 0 && (
           <div className="mt-6">

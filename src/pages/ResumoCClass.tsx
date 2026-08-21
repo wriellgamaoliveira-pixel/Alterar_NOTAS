@@ -22,13 +22,24 @@ import Papa from 'papaparse';
 import { saveAs } from 'file-saver';
 import { useBK } from '@/context/BKContext';
 import { bkDocumentsToNotas } from '@/services/bkFiscalAdapter';
+import { CATEGORY_LABELS, type BKCategory, type BKCFOPConfig } from '@/types/bk';
+
+const today = new Date();
+const initialPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+const finalPeriod = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+
+function classificationForCFOP(cfop: string, config: BKCFOPConfig) {
+  const normalized = cfop.replace(/\D/g, '');
+  const match = (Object.entries(config) as Array<[Exclude<BKCategory, 'outras-saidas'>, string[]]>).find(([, values]) => values.includes(normalized));
+  return match ? CATEGORY_LABELS[match[0]] : 'SEM_CLASS';
+}
 
 export default function ResumoCClass() {
   const { activeModule } = useModule();
-  const { documents } = useBK();
+  const { documents, config } = useBK();
   const [uploadedNotas, setUploadedNotas] = useState<NotaFiscal[]>([]);
   const [centralNotas, setCentralNotas] = useState<NotaFiscal[]>([]);
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); const [limit, setLimit] = useState(100);
+  const [dateFrom, setDateFrom] = useState(initialPeriod); const [dateTo, setDateTo] = useState(finalPeriod); const [limit, setLimit] = useState(100);
   const notas = centralNotas.length ? centralNotas : uploadedNotas;
   const [progress, setProgress] = useState<{ current: number; total: number; message: string; status: 'idle' | 'processing' | 'completed' | 'error' }>({ current: 0, total: 0, message: '', status: 'idle' });
   const [filter, setFilter] = useState('');
@@ -63,7 +74,7 @@ export default function ResumoCClass() {
       nota.produtos.forEach(prod => {
         totalValor += prod.valorTotal;
         totalItens++;
-        const cClass = prod.cClass || 'SEM_CLASS';
+        const cClass = classificationForCFOP(prod.cfop, config);
         if (!map.has(cClass)) {
           map.set(cClass, { cClass, descricao: getCClassDesc(cClass), quantidade: 0, valorTotal: 0, percentual: 0, cfops: new Map() });
         }
@@ -86,7 +97,7 @@ export default function ResumoCClass() {
     });
 
     return { list: Array.from(map.values()), totalValor, totalItens };
-  }, [notas]);
+  }, [notas, config]);
 
   const itensList = useMemo<ItemRelatorio[]>(() => {
     const items: ItemRelatorio[] = [];
@@ -98,7 +109,7 @@ export default function ResumoCClass() {
           emitente: nota.emitente.nome,
           produto: prod.nome,
           ncm: prod.ncm,
-          cClass: prod.cClass || 'SEM_CLASS',
+          cClass: classificationForCFOP(prod.cfop, config),
           cfop: prod.cfop,
           valor: prod.valorTotal,
           icms: prod.icms.valor,
@@ -109,7 +120,7 @@ export default function ResumoCClass() {
       });
     });
     return items;
-  }, [notas]);
+  }, [notas, config]);
 
   const chartData = useMemo(() => {
     return [...cClassData.list]
@@ -173,10 +184,10 @@ export default function ResumoCClass() {
     return (
       <div className="mx-auto max-w-[1200px] px-6 py-8">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-[#f1f5f9]">Relatório por cClass</h1>
+          <h1 className="text-2xl font-bold text-[#f1f5f9]">Relatório por classificação CFOP</h1>
           <p className="text-sm text-[#94a3b8]">A base central ainda não possui notas deste módulo.</p>
         </div>
-        <div className="mb-5 grid gap-3 rounded-xl border border-sky-500/30 bg-[#1e293b] p-4 sm:grid-cols-[200px_180px_auto]"><label className="text-xs text-[#94a3b8]">Mês de emissão<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Quantidade<select value={limit} onChange={(event) => setLimit(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white">{[10,20,50,100,200,500,1000,2000,5000].map((value) => <option key={value}>{value}</option>)}</select></label><button onClick={() => setCentralNotas(bkDocumentsToNotas(documents.filter((item) => activeModule === 'nfe' && (!month || item.issueDate.startsWith(month))).slice(0, limit)))} className="self-end rounded-lg bg-[#38bdf8] px-4 py-2 font-semibold text-[#0f172a]">Buscar no banco de dados</button></div>
+        <div className="mb-5 grid gap-3 rounded-xl border border-sky-500/30 bg-[#1e293b] p-4 sm:grid-cols-[180px_180px_180px_auto]"><label className="text-xs text-[#94a3b8]">Data inicial<input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Data final<input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Quantidade na tela<select value={limit} onChange={(event) => setLimit(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white">{[10,20,50,100,200,500,1000,2000,5000].map((value) => <option key={value}>{value}</option>)}</select></label><button onClick={() => setCentralNotas(bkDocumentsToNotas(documents.filter((item) => { const issueDay = item.issueDate.slice(0, 10); return activeModule === 'nfe' && (!dateFrom || issueDay >= dateFrom) && (!dateTo || issueDay <= dateTo); }).slice(0, limit)))} className="self-end rounded-lg bg-[#38bdf8] px-4 py-2 font-semibold text-[#0f172a]">Buscar no banco de dados</button></div>
         <UploadDropzone
           onFilesSelected={handleFiles}
           accept=".zip"
@@ -200,7 +211,7 @@ export default function ResumoCClass() {
     <div className="mx-auto max-w-[1400px] px-6 py-8">
       <div className="mb-6 flex items-center justify-between print:hidden">
         <div>
-          <h1 className="text-2xl font-bold text-[#f1f5f9]">Relatório por cClass</h1>
+          <h1 className="text-2xl font-bold text-[#f1f5f9]">Relatório por classificação CFOP</h1>
           <p className="text-sm text-[#94a3b8]">{notas.length} notas da {centralNotas.length ? 'base central' : 'importação avulsa'}</p>
         </div>
         <div className="flex gap-2">
@@ -222,7 +233,7 @@ export default function ResumoCClass() {
       </div>
 
       <div className="mb-6 rounded-xl border border-[#334155] bg-[#1e293b] p-5 print:hidden">
-        <h3 className="mb-4 text-sm font-semibold text-[#f1f5f9]">Top 12 cClass por Valor</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[#f1f5f9]">Top 12 classificações CFOP por valor</h3>
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={chartData} layout="vertical" margin={{ left: 20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
@@ -242,13 +253,13 @@ export default function ResumoCClass() {
       </div>
 
       <div className="mb-6 rounded-xl border border-[#334155] bg-[#1e293b] p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[#f1f5f9]">Resumo por cClass</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[#f1f5f9]">Resumo por classificação da Configuração CFOP</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#334155]">
                 <th className="py-2 text-left text-[#94a3b8]"></th>
-                <th className="py-2 text-left text-[#94a3b8]">cClass</th>
+                <th className="py-2 text-left text-[#94a3b8]">Classificação</th>
                 <th className="py-2 text-left text-[#94a3b8]">Descrição</th>
                 <th className="py-2 text-right text-[#94a3b8]">Qtd Itens</th>
                 <th className="py-2 text-right text-[#94a3b8]">Valor Total</th>
@@ -321,7 +332,7 @@ export default function ResumoCClass() {
                 <th className="py-2 text-left text-[#94a3b8]">Emitente</th>
                 <th className="py-2 text-left text-[#94a3b8]">Produto</th>
                 <th className="py-2 text-left text-[#94a3b8]">NCM</th>
-                <th className="py-2 text-left text-[#94a3b8]">cClass</th>
+                <th className="py-2 text-left text-[#94a3b8]">Classificação</th>
                 <th className="py-2 text-left text-[#94a3b8]">CFOP</th>
                 <th className="cursor-pointer py-2 text-right text-[#94a3b8]" onClick={() => handleSort('valor')}>
                   <div className="flex items-center justify-end gap-1">
@@ -362,6 +373,10 @@ export default function ResumoCClass() {
 function getCClassDesc(cClass: string): string {
   const map: Record<string, string> = {
     'SEM_CLASS': 'Sem Classificacao',
+    'Remessa': 'CFOP configurado como Remessa',
+    'Exportação': 'CFOP configurado como Exportação',
+    'Venda Interna': 'CFOP configurado como Venda Interna',
+    'Devolução': 'CFOP configurado como Devolução',
     'MERCADORIA': 'Mercadoria para Revenda',
     'MATERIA_PRIMA': 'Materia Prima',
     'EMBALAGEM': 'Embalagem',
