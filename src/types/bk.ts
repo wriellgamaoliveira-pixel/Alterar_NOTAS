@@ -130,6 +130,28 @@ export interface BKCFOPConfig {
   devolucao: string[];
 }
 
+export interface BKStoredState {
+  version: 1;
+  documents: BKDocument[];
+  config: BKCFOPConfig;
+  units: BKUnit[];
+  deadlineDays: number;
+  warningDays: number;
+  folderName?: string;
+  autoSyncMinutes: number;
+  lastSync?: string;
+  knownFiles: Record<string, string>;
+}
+
+export interface BKSyncResult {
+  ok: boolean;
+  message: string;
+  analyzed: number;
+  imported: number;
+  updated: number;
+  ignored: number;
+}
+
 export const CATEGORY_LABELS: Record<BKCategory, string> = {
   remessa: 'Remessa',
   exportacao: 'Exportação',

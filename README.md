@@ -27,6 +27,11 @@ unidade emitente, prevencao de duplicidade e atualizacao posterior por eventos
 de cancelamento. Os dados ficam no armazenamento local versionado do navegador;
 nenhum XML e enviado para servicos externos.
 
+O estado local e salvo em IndexedDB. Na configuracao, o usuario pode escolher
+uma pasta para manter o espelho portatil `bk-documentos.json`, sincronizar XMLs
+novos e transportar a base para outro computador. A pesquisa automatica ocorre
+enquanto a pagina estiver aberta e autorizada no Chrome ou Edge.
+
 > Esta distribuicao e estatica (GitHub Pages) e nao possui banco multiusuario.
 > O estado BK foi isolado em `BKContext` para permitir a troca futura por uma
 > API do sistema Fechamento sem alterar o parser nem as telas.

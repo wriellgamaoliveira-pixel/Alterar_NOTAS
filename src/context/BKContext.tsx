@@ -1,41 +1,64 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { classifyCFOP } from '@/parsers/bkParser';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { classifyCFOP, parseBKXml } from '@/parsers/bkParser';
+import {
+  ensureDirectoryPermission,
+  listChangedXmlFiles,
+  loadDirectoryHandle,
+  loadIndexedState,
+  readPortableBackup,
+  requestDirectory,
+  saveIndexedState,
+  writePortableBackup,
+} from '@/services/bkIndexedDb';
 import {
   DEFAULT_CFOP_CONFIG,
   DEFAULT_UNITS,
   type BKCFOPConfig,
   type BKDocument,
   type BKEvent,
-  type BKUnit,
+  type BKStoredState,
+  type BKSyncResult,
 } from '@/types/bk';
 
-const STORAGE_KEY = 'portal-fiscal-bk-v1';
+const LEGACY_STORAGE_KEY = 'portal-fiscal-bk-v1';
 
-interface StoredBKState {
-  version: 1;
-  documents: BKDocument[];
-  config: BKCFOPConfig;
-  units: BKUnit[];
-  deadlineDays: number;
-  warningDays: number;
-}
-
-interface BKContextValue extends StoredBKState {
+interface BKContextValue extends BKStoredState {
+  storageReady: boolean;
+  storageBusy: boolean;
+  storageError?: string;
   saveConfig: (config: BKCFOPConfig, deadlineDays: number, warningDays: number) => { ok: boolean; message: string };
   importBatch: (documents: BKDocument[], events: Array<{ accessKey: string; event: BKEvent }>) => { imported: number; updated: number };
   saveDocument: (document: BKDocument) => void;
   deleteDocuments: (ids: string[]) => { ok: boolean; message: string };
   reclassify: (from?: string, to?: string) => { ok: boolean; message: string; count: number };
+  selectStorageFolder: () => Promise<string>;
+  syncStorageFolder: (requestPermission?: boolean) => Promise<BKSyncResult>;
+  exportPortableBackup: () => Promise<string>;
+  importPortableBackup: () => Promise<string>;
+  setAutoSyncMinutes: (minutes: number) => void;
 }
 
 const BKContext = createContext<BKContextValue | undefined>(undefined);
 
-function loadState(): StoredBKState {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '') as StoredBKState;
-    if (parsed.version === 1 && Array.isArray(parsed.documents)) return parsed;
-  } catch { /* inicia com configuração segura */ }
-  return { version: 1, documents: [], config: DEFAULT_CFOP_CONFIG, units: DEFAULT_UNITS, deadlineDays: 180, warningDays: 30 };
+const emptyState = (): BKStoredState => ({
+  version: 1, documents: [], config: DEFAULT_CFOP_CONFIG, units: DEFAULT_UNITS,
+  deadlineDays: 180, warningDays: 30, autoSyncMinutes: 5, knownFiles: {},
+});
+
+function normalizeState(value?: Partial<BKStoredState>): BKStoredState {
+  return {
+    ...emptyState(), ...value,
+    documents: Array.isArray(value?.documents) ? value.documents : [],
+    config: value?.config || DEFAULT_CFOP_CONFIG,
+    units: Array.isArray(value?.units) ? value.units : DEFAULT_UNITS,
+    knownFiles: value?.knownFiles || {},
+    autoSyncMinutes: Number(value?.autoSyncMinutes) >= 1 ? Number(value?.autoSyncMinutes) : 5,
+  };
+}
+
+function loadLegacyState() {
+  try { return normalizeState(JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || '')); }
+  catch { return emptyState(); }
 }
 
 function eventStatus(events: BKEvent[], fallback: BKDocument['fiscalStatus']) {
@@ -45,49 +68,73 @@ function eventStatus(events: BKEvent[], fallback: BKDocument['fiscalStatus']) {
   return fallback;
 }
 
+function mergeFiscalData(current: BKDocument[], incomingDocuments: BKDocument[], incomingEvents: Array<{ accessKey: string; event: BKEvent }>) {
+  const documents = structuredClone(current);
+  let imported = 0; let updated = 0;
+  for (const incoming of incomingDocuments) {
+    const index = documents.findIndex((item) =>
+      (incoming.accessKey && item.accessKey === incoming.accessKey) || item.complementaryId === incoming.complementaryId);
+    if (index < 0) { documents.push(incoming); imported += 1; }
+    else {
+      const events = [...documents[index].events];
+      incoming.events.forEach((event) => { if (!events.some((saved) => saved.id === event.id)) events.push(event); });
+      documents[index] = { ...documents[index], ...incoming, events, fiscalStatus: eventStatus(events, incoming.fiscalStatus) };
+      updated += 1;
+    }
+  }
+  for (const incoming of incomingEvents) {
+    const index = documents.findIndex((item) => item.accessKey === incoming.accessKey);
+    if (index >= 0 && !documents[index].events.some((event) => event.id === incoming.event.id)) {
+      const events = [...documents[index].events, incoming.event];
+      documents[index] = { ...documents[index], events, fiscalStatus: eventStatus(events, documents[index].fiscalStatus) };
+      updated += 1;
+    }
+  }
+  return { documents, imported, updated };
+}
+
 export function BKProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<StoredBKState>(loadState);
+  const [state, setState] = useState<BKStoredState>(loadLegacyState);
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageError, setStorageError] = useState<string>();
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch (error) { console.error('Não foi possível persistir o estado BK no navegador.', error); }
-  }, [state]);
+    let active = true;
+    if (!('indexedDB' in window)) {
+      setStorageError('Este navegador não oferece IndexedDB. Use Chrome ou Edge atualizado.');
+      setStorageReady(true);
+      return () => { active = false; };
+    }
+    loadIndexedState().then(async (saved) => {
+      if (!active) return;
+      const loaded = saved ? normalizeState(saved) : loadLegacyState();
+      setState(loaded); stateRef.current = loaded; setStorageReady(true);
+      if (!saved) await saveIndexedState(loaded);
+    }).catch((error) => { console.error('Falha ao abrir IndexedDB.', error); setStorageError('Não foi possível abrir o IndexedDB neste navegador.'); setStorageReady(true); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        await saveIndexedState(state);
+        if (state.folderName) {
+          const handle = await loadDirectoryHandle();
+          if (handle && await ensureDirectoryPermission(handle, false)) await writePortableBackup(handle, state);
+        }
+      } catch (error) { console.error('Falha ao salvar a base BK.', error); }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [state, storageReady]);
 
   const importBatch = useCallback<BKContextValue['importBatch']>((incomingDocuments, incomingEvents) => {
-    let imported = 0;
-    let updated = 0;
-    setState((current) => {
-      const snapshot = structuredClone(current);
-      try {
-        const documents = [...current.documents];
-        for (const incoming of incomingDocuments) {
-          const index = documents.findIndex((item) =>
-            (incoming.accessKey && item.accessKey === incoming.accessKey) || item.complementaryId === incoming.complementaryId);
-          if (index < 0) {
-            documents.push(incoming);
-            imported += 1;
-          } else {
-            const events = [...documents[index].events];
-            incoming.events.forEach((event) => { if (!events.some((saved) => saved.id === event.id)) events.push(event); });
-            documents[index] = { ...documents[index], events, fiscalStatus: eventStatus(events, documents[index].fiscalStatus) };
-            updated += 1;
-          }
-        }
-        for (const incoming of incomingEvents) {
-          const index = documents.findIndex((item) => item.accessKey === incoming.accessKey);
-          if (index < 0) continue;
-          if (!documents[index].events.some((event) => event.id === incoming.event.id)) {
-            const events = [...documents[index].events, incoming.event];
-            documents[index] = { ...documents[index], events, fiscalStatus: eventStatus(events, documents[index].fiscalStatus) };
-            updated += 1;
-          }
-        }
-        return { ...current, documents };
-      } catch (error) {
-        console.error('Importação restaurada após falha', error);
-        return snapshot;
-      }
-    });
-    return { imported, updated };
+    const result = mergeFiscalData(stateRef.current.documents, incomingDocuments, incomingEvents);
+    setState((current) => ({ ...current, documents: result.documents }));
+    return { imported: result.imported, updated: result.updated };
   }, []);
 
   const saveDocument = useCallback((document: BKDocument) => {
@@ -95,54 +142,113 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteDocuments = useCallback<BKContextValue['deleteDocuments']>((ids) => {
-    let result = { ok: true, message: 'Documento(s) excluído(s).' };
-    setState((current) => {
-      const blocked = current.documents.filter((item) => ids.includes(item.id) && item.shipmentId);
-      if (blocked.length) {
-        result = { ok: false, message: 'Há documento vinculado a embarque. Desvincule-o antes de excluir.' };
-        return current;
-      }
-      return { ...current, documents: current.documents.filter((item) => !ids.includes(item.id)) };
-    });
-    return result;
+    if (stateRef.current.documents.some((item) => ids.includes(item.id) && item.shipmentId))
+      return { ok: false, message: 'Há documento vinculado a embarque. Desvincule-o antes de excluir.' };
+    setState((current) => ({ ...current, documents: current.documents.filter((item) => !ids.includes(item.id)) }));
+    return { ok: true, message: 'Documento(s) excluído(s).' };
   }, []);
 
   const saveConfig = useCallback<BKContextValue['saveConfig']>((config, deadlineDays, warningDays) => {
     const seen = new Map<string, string>();
-    for (const [category, values] of Object.entries(config)) {
-      for (const value of values) {
-        if (seen.has(value)) return { ok: false, message: `CFOP ${value} repetido em ${seen.get(value)} e ${category}.` };
-        seen.set(value, category);
-      }
+    for (const [category, values] of Object.entries(config)) for (const value of values) {
+      if (seen.has(value)) return { ok: false, message: `CFOP ${value} repetido em ${seen.get(value)} e ${category}.` };
+      seen.set(value, category);
     }
     setState((current) => ({ ...current, config, deadlineDays, warningDays }));
     return { ok: true, message: 'Configuração salva. Use reclassificar para atualizar o histórico.' };
   }, []);
 
   const reclassify = useCallback<BKContextValue['reclassify']>((from, to) => {
-    let count = 0;
-    let blocked = false;
-    setState((current) => {
-      const documents = current.documents.map((document) => {
-        const date = document.issueDate.slice(0, 10);
-        if ((from && date < from) || (to && date > to)) return document;
-        const category = classifyCFOP(document.cfops, current.config);
-        if (document.category === 'exportacao' && category !== 'exportacao' && document.shipmentId) {
-          blocked = true;
-          return document;
-        }
-        if (category !== document.category) count += 1;
-        return { ...document, category };
-      });
-      return blocked ? current : { ...current, documents };
+    const current = stateRef.current;
+    const changes = current.documents.map((document) => {
+      const documentDate = document.issueDate.slice(0, 10);
+      if ((from && documentDate < from) || (to && documentDate > to)) return document;
+      return { ...document, category: classifyCFOP(document.cfops, current.config) };
     });
-    return blocked
-      ? { ok: false, message: 'Reclassificação bloqueada: há nota de exportação vinculada a embarque.', count: 0 }
-      : { ok: true, message: `${count} documento(s) reclassificado(s).`, count };
+    if (changes.some((document, index) => current.documents[index].category === 'exportacao' && document.category !== 'exportacao' && document.shipmentId))
+      return { ok: false, message: 'Reclassificação bloqueada: há nota de exportação vinculada a embarque.', count: 0 };
+    const count = changes.filter((document, index) => document.category !== current.documents[index].category).length;
+    setState((saved) => ({ ...saved, documents: changes }));
+    return { ok: true, message: `${count} documento(s) reclassificado(s).`, count };
   }, []);
 
-  const value = useMemo(() => ({ ...state, saveConfig, importBatch, saveDocument, deleteDocuments, reclassify }),
-    [state, saveConfig, importBatch, saveDocument, deleteDocuments, reclassify]);
+  const selectStorageFolder = useCallback(async () => {
+    setStorageBusy(true);
+    try {
+      const handle = await requestDirectory();
+      const backup = await readPortableBackup(handle);
+      if (backup) {
+        const imported = normalizeState(backup);
+        const merged = mergeFiscalData(stateRef.current.documents, imported.documents, []);
+        const next = { ...imported, documents: merged.documents, folderName: handle.name };
+        setState(next); stateRef.current = next; await saveIndexedState(next);
+        return `Pasta ${handle.name} configurada. Backup encontrado e ${merged.imported} documento(s) carregado(s).`;
+      }
+      setState((current) => ({ ...current, folderName: handle.name }));
+      return `Pasta ${handle.name} configurada. O arquivo bk-documentos.json será criado automaticamente.`;
+    } finally { setStorageBusy(false); }
+  }, []);
+
+  const syncStorageFolder = useCallback(async (requestPermission = true): Promise<BKSyncResult> => {
+    setStorageBusy(true);
+    try {
+      const handle = await loadDirectoryHandle();
+      if (!handle) return { ok: false, message: 'Selecione primeiro a pasta de armazenamento.', analyzed: 0, imported: 0, updated: 0, ignored: 0 };
+      if (!await ensureDirectoryPermission(handle, requestPermission)) return { ok: false, message: 'A permissão da pasta precisa ser renovada.', analyzed: 0, imported: 0, updated: 0, ignored: 0 };
+      const current = stateRef.current;
+      const { changed, discovered } = await listChangedXmlFiles(handle, current.knownFiles);
+      const parsedDocuments: BKDocument[] = []; const parsedEvents: Array<{ accessKey: string; event: BKEvent }> = [];
+      let ignored = 0;
+      for (const entry of changed) {
+        try {
+          const parsed = parseBKXml(await entry.file.text(), entry.path, current.config);
+          if (parsed.kind === 'document') {
+            const unit = current.units.find((candidate) => candidate.cnpj === parsed.document.issuerTaxId);
+            if (!unit) { ignored += 1; continue; }
+            parsed.document.unitId = unit.id; parsedDocuments.push(parsed.document);
+          } else parsedEvents.push({ accessKey: parsed.accessKey, event: parsed.event });
+        } catch { ignored += 1; }
+      }
+      const merged = mergeFiscalData(current.documents, parsedDocuments, parsedEvents);
+      const next: BKStoredState = { ...current, documents: merged.documents, folderName: handle.name, knownFiles: discovered, lastSync: new Date().toISOString() };
+      setState(next); stateRef.current = next; await saveIndexedState(next); await writePortableBackup(handle, next);
+      return { ok: true, message: `Sincronização concluída: ${merged.imported} nova(s), ${merged.updated} atualizada(s), ${ignored} ignorada(s).`, analyzed: changed.length, imported: merged.imported, updated: merged.updated, ignored };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Falha ao sincronizar a pasta.', analyzed: 0, imported: 0, updated: 0, ignored: 0 };
+    } finally { setStorageBusy(false); }
+  }, []);
+
+  const exportPortableBackup = useCallback(async () => {
+    const handle = await loadDirectoryHandle();
+    if (!handle || !await ensureDirectoryPermission(handle, true)) throw new Error('Selecione e autorize a pasta primeiro.');
+    await writePortableBackup(handle, stateRef.current);
+    return `Backup atualizado em ${handle.name}/bk-documentos.json.`;
+  }, []);
+
+  const importPortableBackup = useCallback(async () => {
+    const handle = await loadDirectoryHandle();
+    if (!handle || !await ensureDirectoryPermission(handle, true)) throw new Error('Selecione e autorize a pasta primeiro.');
+    const backup = await readPortableBackup(handle);
+    if (!backup) throw new Error('O arquivo bk-documentos.json não foi encontrado na pasta.');
+    const imported = normalizeState(backup); const merged = mergeFiscalData(stateRef.current.documents, imported.documents, []);
+    const next = { ...imported, documents: merged.documents, folderName: handle.name };
+    setState(next); stateRef.current = next; await saveIndexedState(next);
+    return `Backup importado: ${merged.imported} documento(s) novo(s).`;
+  }, []);
+
+  const setAutoSyncMinutes = useCallback((minutes: number) => {
+    setState((current) => ({ ...current, autoSyncMinutes: Math.max(1, Math.min(1440, minutes || 5)) }));
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady || !state.folderName) return;
+    const initialSync = window.setTimeout(() => void syncStorageFolder(false), 1_000);
+    const timer = window.setInterval(() => void syncStorageFolder(false), state.autoSyncMinutes * 60_000);
+    return () => { window.clearTimeout(initialSync); window.clearInterval(timer); };
+  }, [state.autoSyncMinutes, state.folderName, storageReady, syncStorageFolder]);
+
+  const value = useMemo(() => ({ ...state, storageReady, storageBusy, storageError, saveConfig, importBatch, saveDocument, deleteDocuments, reclassify, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes }),
+    [state, storageReady, storageBusy, storageError, saveConfig, importBatch, saveDocument, deleteDocuments, reclassify, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes]);
   return <BKContext.Provider value={value}>{children}</BKContext.Provider>;
 }
 
