@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Download, Eye, FileOutput, History, MoreHori
 import { useParams } from 'react-router-dom';
 import { useBK } from '@/context/BKContext';
 import { CATEGORY_LABELS, type BKCategory, type BKDocument } from '@/types/bk';
+import { saveExcelFile } from '@/services/excelExport';
 
 const money = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const number = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 3 });
@@ -13,16 +14,6 @@ const date = (value?: string) => {
 };
 const dateTime = (value?: string) => value ? new Date(value).toLocaleString('pt-BR') : '—';
 const statusLabel = { autorizada: 'Autorizada', cancelada: 'Cancelada', pendente: 'Pendente' };
-
-function downloadCSV(documents: BKDocument[]) {
-  const rows = [['Número', 'Série', 'Emitente', 'Unidade', 'Chave', 'Emissão', 'CFOP', 'Categoria', 'Situação fiscal', 'Peso kg', 'Valor'],
-    ...documents.map((item) => [item.number, item.series, item.issuerName, item.unitId, item.accessKey, item.issueDate, item.cfops.join(' / '), CATEGORY_LABELS[item.category], statusLabel[item.fiscalStatus], item.netWeight || item.commercialQuantity, item.invoiceValue])];
-  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';')).join('\r\n');
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
-  link.download = `documentos-bk-${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click(); URL.revokeObjectURL(link.href);
-}
 
 function printDanfe(item: BKDocument) {
   const popup = window.open('', '_blank', 'noopener,noreferrer');
@@ -67,6 +58,19 @@ export default function BKDocuments() {
   const selectedDocs = filtered.filter((item) => selected.includes(item.id));
   const weightFiltered = filtered.reduce((sum, item) => sum + (item.netWeight || item.commercialQuantity), 0);
   const weightTotal = documents.filter((item) => item.category === category).reduce((sum, item) => sum + (item.netWeight || item.commercialQuantity), 0);
+  async function downloadExcel(items: BKDocument[]) {
+    const headers = ['Número da nota', 'Fornecedor', 'Unidade emitente', 'Chave da nota', 'Data de emissão', 'Data de averbação', 'Situação do prazo', 'CFOP', 'Tipo', 'Situação fiscal', 'Averbação', 'Referências', 'Peso do produto (kg)', 'Valor da nota (R$)', 'Notas de exportação'];
+    const rows = items.map((item) => {
+      const relatedExports = referencesFor(item);
+      const exportNumbers = relatedExports.length ? relatedExports.map((reference) => reference.number).join('; ') : item.category === 'exportacao' && item.fiscalStatus === 'autorizada' ? item.number : '—';
+      const averbation = item.category === 'remessa' ? (relatedExports.length ? `Averbada — NF-e ${exportNumbers}` : item.fiscalStatus === 'cancelada' ? 'Cancelada' : 'Não averbada') : item.category === 'exportacao' ? 'Nota de exportação' : 'Não se aplica';
+      const referenceValues = item.category === 'remessa' ? relatedExports.map((reference) => reference.accessKey).join('; ') : item.references.join('; ');
+      const averbationDate = item.category === 'remessa' ? relatedExports.map((reference) => reference.issueDate).sort()[0] : item.category === 'exportacao' ? item.authorizationDate || item.issueDate : undefined;
+      return [item.number, item.issuerName, units.find((candidate) => candidate.id === item.unitId)?.nome || '—', item.accessKey || 'Manual', date(item.issueDate), date(averbationDate), item.category === 'remessa' ? deadlineState(item) : 'Não se aplica', item.cfops.join('; '), item.operationType === 'saida' ? 'Saída' : 'Entrada', statusLabel[item.fiscalStatus], averbation, referenceValues || '—', item.netWeight || item.commercialQuantity, item.invoiceValue, exportNumbers];
+    });
+    await saveExcelFile(`documentos-bk-${category}-${new Date().toISOString().slice(0, 10)}.xlsx`, CATEGORY_LABELS[category], headers, rows, [13]);
+    setMessage(`${items.length} documento(s) exportado(s) para Excel.`);
+  }
   const cards = (() => {
     if (category !== 'remessa') return [];
     const groups = [
@@ -87,7 +91,7 @@ export default function BKDocuments() {
   }
 
   return <div className="space-y-4">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-xl font-bold text-white">{CATEGORY_LABELS[category]}</h1><p className="mt-1 text-sm text-slate-400">Departamento calculado sobre a base central de NF-e. A nota não é copiada nem salva novamente.</p></div><div className="flex gap-2"><button onClick={() => setManual(true)} className="bk-button-secondary"><Plus className="h-4 w-4" />Incluir manual</button><button onClick={() => downloadCSV(selectedDocs.length ? selectedDocs : filtered)} className="bk-button"><Download className="h-4 w-4" />Excel filtrado</button></div></div>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-xl font-bold text-white">{CATEGORY_LABELS[category]}</h1><p className="mt-1 text-sm text-slate-400">Departamento calculado sobre a base central de NF-e. A nota não é copiada nem salva novamente.</p></div><div className="flex gap-2"><button onClick={() => setManual(true)} className="bk-button-secondary"><Plus className="h-4 w-4" />Incluir manual</button><button onClick={() => void downloadExcel(selectedDocs.length ? selectedDocs : filtered)} className="bk-button"><Download className="h-4 w-4" />Excel filtrado</button></div></div>
     {category === 'remessa' && <section className="rounded-xl border border-slate-700 bg-slate-900/70"><button onClick={() => setIndicators(!indicators)} className="flex w-full items-center justify-between p-4 text-left font-semibold text-white">Indicadores de Averbação {indicators ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>{indicators && <div className="grid gap-3 border-t border-slate-700 p-4 sm:grid-cols-2 lg:grid-cols-4">{cards.map((card) => <div key={card.label} className="rounded-xl border border-slate-700 bg-slate-950/60 p-4"><div className={`mb-3 h-1.5 rounded ${card.color}`} /><p className="text-xs font-semibold text-slate-300">{card.label}</p><p className="mt-1 text-lg font-bold text-white">{money(card.value)}</p><p className="text-xs text-slate-400">{card.percentage.toFixed(1)}% · {card.items.length} nota(s) · {number(card.weight)} kg</p></div>)}</div>}</section>}
     <section className="rounded-xl border border-slate-700 bg-slate-900/70 p-4"><div className="grid gap-2 md:grid-cols-2 xl:grid-cols-7"><label className="relative xl:col-span-2"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" /><input className="bk-input pl-9" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Número, fornecedor, chave ou CFOP" /></label><select className="bk-input" value={link} onChange={(e) => setLink(e.target.value)}><option value="all">Todos os vínculos</option><option value="linked">Vinculadas</option><option value="available">Disponíveis</option></select><select className="bk-input" value={unit} onChange={(e) => setUnit(e.target.value)}><option value="all">Todas as unidades</option>{units.map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}</select><select className="bk-input" value={fiscal} onChange={(e) => setFiscal(e.target.value)}><option value="all">Todas as situações</option><option value="autorizada">Autorizadas</option><option value="cancelada">Canceladas</option><option value="pendente">Pendentes</option></select>{category === 'remessa' && <select className="bk-input" value={averb} onChange={(e) => setAverb(e.target.value)}><option value="all">Toda averbação</option><option value="averbada">Averbadas</option><option value="nao-averbada">Não averbadas</option><option value="cancelada">Canceladas</option></select>}<select className="bk-input" value={column} onChange={(e) => setColumn(e.target.value)}><option value="all">Filtro por coluna</option><option value="number">Número</option><option value="issuer">Fornecedor</option><option value="recipient">Destinatário</option><option value="key">Chave</option><option value="cfop">CFOP</option></select><input className="bk-input" disabled={column === 'all'} value={columnValue} onChange={(e) => setColumnValue(e.target.value)} placeholder="Valor da coluna" /></div>{category === 'remessa' && <p className="mt-3 text-xs text-slate-400">Peso filtrado: <strong className="text-sky-300">{number(weightFiltered)} kg</strong> · Total geral: <strong className="text-white">{number(weightTotal)} kg</strong></p>}</section>
     {message && <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">{message}</div>}
