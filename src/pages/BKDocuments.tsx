@@ -71,16 +71,18 @@ export default function BKDocuments() {
   const weightFiltered = allMatching.reduce((sum, item) => sum + (item.netWeight || item.commercialQuantity), 0);
   const weightTotal = documents.filter((item) => item.category === category).reduce((sum, item) => sum + (item.netWeight || item.commercialQuantity), 0);
   async function downloadExcel(items: BKDocument[]) {
-    const headers = ['Número da nota', 'Fornecedor', 'Unidade emitente', 'Chave da nota', 'Data de emissão', 'Data de averbação', 'Situação do prazo', 'CFOP', 'Tipo', 'Situação fiscal', 'Averbação', 'Referências', 'Peso do produto (kg)', 'Valor da nota (R$)', 'Notas de exportação'];
+    const headers = ['Número da nota', 'Fornecedor', 'Unidade emitente', 'Nome do destinatário', 'CNPJ destinatário', 'Nome do transportador', 'CNPJ transportador', 'Chave da nota', 'Data de emissão', 'Data de averbação', 'Situação do prazo', 'CFOP', 'Tipo', 'Situação fiscal', 'Averbação', 'Referências', 'Produtos da nota', 'Peso do produto (kg)', 'Valor da nota (R$)', 'Situação fiscal / notas de exportação', 'Dados adicionais da nota'];
     const rows = items.map((item) => {
       const relatedExports = referencesFor(item);
       const exportNumbers = relatedExports.length ? relatedExports.map((reference) => reference.number).join('; ') : item.category === 'exportacao' && item.fiscalStatus === 'autorizada' ? item.number : '—';
       const averbation = item.category === 'remessa' ? (relatedExports.length ? `Averbada — NF-e ${exportNumbers}` : item.fiscalStatus === 'cancelada' ? 'Cancelada' : 'Não averbada') : item.category === 'exportacao' ? 'Nota de exportação' : 'Não se aplica';
       const referenceValues = item.category === 'remessa' ? relatedExports.map((reference) => reference.accessKey).join('; ') : item.references.join('; ');
       const averbationDate = item.category === 'remessa' ? relatedExports.map((reference) => reference.issueDate).sort()[0] : item.category === 'exportacao' ? item.authorizationDate || item.issueDate : undefined;
-      return [item.number, item.issuerName, units.find((candidate) => candidate.id === item.unitId)?.nome || '—', item.accessKey || 'Manual', date(item.issueDate), date(averbationDate), item.category === 'remessa' ? deadlineState(item) : 'Não se aplica', item.cfops.join('; '), item.operationType === 'saida' ? 'Saída' : 'Entrada', statusLabel[item.fiscalStatus], averbation, referenceValues || '—', item.netWeight || item.commercialQuantity, item.invoiceValue, exportNumbers];
+      const products = item.products.map((product) => `${product.code ? `${product.code} — ` : ''}${product.description} | Qtd.: ${number(product.quantity)} ${product.unit || ''} | CFOP: ${product.cfop || '—'}`).join('\n');
+      const exportFiscalStatus = exportNumbers !== '—' ? `OK — NF-e ${exportNumbers}` : statusLabel[item.fiscalStatus];
+      return [item.number, item.issuerName, units.find((candidate) => candidate.id === item.unitId)?.nome || '—', item.recipientName || '—', item.recipientTaxId || '—', item.carrierName || '—', item.carrierTaxId || '—', item.accessKey || 'Manual', date(item.issueDate), date(averbationDate), item.category === 'remessa' ? deadlineState(item) : 'Não se aplica', item.cfops.join('; '), item.operationType === 'saida' ? 'Saída' : 'Entrada', statusLabel[item.fiscalStatus], averbation, referenceValues || '—', products || '—', item.netWeight || item.commercialQuantity, item.invoiceValue, exportFiscalStatus, item.additionalInfo || '—'];
     });
-    await saveExcelFile(`documentos-bk-${category}-${new Date().toISOString().slice(0, 10)}.xlsx`, CATEGORY_LABELS[category], headers, rows, [13]);
+    await saveExcelFile(`documentos-bk-${category}-${new Date().toISOString().slice(0, 10)}.xlsx`, CATEGORY_LABELS[category], headers, rows, [18], [16, 20]);
     setMessage(`${items.length} documento(s) exportado(s) para Excel.`);
   }
   const cards = (() => {
