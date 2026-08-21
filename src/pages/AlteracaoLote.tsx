@@ -42,8 +42,7 @@ function OpCard({ tipo, title, icon: Icon, children, onProcess, state, centralCo
 
 export default function AlteracaoLote() {
   const { activeModule } = useModule();
-  const { documents } = useBK();
-  const centralXmls = documents.filter((document) => document.rawXml);
+  const { documents, loadDocumentXmlFiles } = useBK();
 
   const [opStates, setOpStates] = useState<Record<OpType, OpState>>({
     'cclass': { status: 'idle', progress: 0, message: '' },
@@ -235,9 +234,10 @@ export default function AlteracaoLote() {
   };
 
   const processarBaseCentral = async (onProcess: (files: File[]) => void) => {
-    if (!centralXmls.length) return;
+    const centralXmls = await loadDocumentXmlFiles(documents.map((document) => document.id));
+    if (!centralXmls.length) { window.alert('Os XMLs completos não estão disponíveis. Sincronize a pasta BK para recuperá-los.'); return; }
     const zip = new JSZip();
-    centralXmls.forEach((document) => zip.file(document.sourceFile.split('/').pop() || `${document.accessKey}.xml`, document.rawXml!));
+    centralXmls.forEach((document) => zip.file(document.name.split('/').pop() || `${document.id}.xml`, document.content));
     const blob = await zip.generateAsync({ type: 'blob' });
     onProcess([new File([blob], 'base-central.zip', { type: 'application/zip' })]);
   };
@@ -266,7 +266,7 @@ export default function AlteracaoLote() {
         </TabsList>
 
         <TabsContent value="cclass">
-          <OpCard tipo="cclass" title="Alterar por cClass/CFOP" icon={Tag} onProcess={processarCClassCFOP} state={opStates.cclass} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarCClassCFOP)} onDownload={baixarResultado}>
+          <OpCard tipo="cclass" title="Alterar por cClass/CFOP" icon={Tag} onProcess={processarCClassCFOP} state={opStates.cclass} centralCount={documents.length} onCentral={() => void processarBaseCentral(processarCClassCFOP)} onDownload={baixarResultado}>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs text-[#94a3b8]">cClass Origem</label>
@@ -289,7 +289,7 @@ export default function AlteracaoLote() {
         </TabsContent>
 
         <TabsContent value="descricao">
-          <OpCard tipo="descricao" title="Alterar por Descrição" icon={FileText} onProcess={processarDescricao} state={opStates.descricao} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarDescricao)} onDownload={baixarResultado}>
+          <OpCard tipo="descricao" title="Alterar por Descrição" icon={FileText} onProcess={processarDescricao} state={opStates.descricao} centralCount={documents.length} onCentral={() => void processarBaseCentral(processarDescricao)} onDownload={baixarResultado}>
             <div className="mb-4">
               <label className="mb-2 block text-sm text-[#94a3b8]">CSV de Mapeamento (descrição original ; nova descrição)</label>
               <UploadDropzone onFilesSelected={handleCsvUpload} accept=".csv" label="Arraste o CSV de mapeamento" sublabel="Formato: descrição original ; nova descrição" />
@@ -301,7 +301,7 @@ export default function AlteracaoLote() {
         </TabsContent>
 
         <TabsContent value="remover-icms">
-          <OpCard tipo="remover-icms" title="Remover CFOP por ICMS" icon={Trash2} onProcess={processarRemoverICMS} state={opStates['remover-icms']} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarRemoverICMS)} onDownload={baixarResultado}>
+          <OpCard tipo="remover-icms" title="Remover CFOP por ICMS" icon={Trash2} onProcess={processarRemoverICMS} state={opStates['remover-icms']} centralCount={documents.length} onCentral={() => void processarBaseCentral(processarRemoverICMS)} onDownload={baixarResultado}>
             <div>
               <label className="mb-1 block text-xs text-[#94a3b8]">Alíquota ICMS (%)</label>
               <input type="number" step="0.01" value={aliquotaICMS} onChange={e => setAliquotaICMS(e.target.value)} placeholder="Ex: 18.00" className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-sm text-[#f1f5f9] placeholder-[#475569] focus:border-[#38bdf8] focus:outline-none" />
@@ -311,7 +311,7 @@ export default function AlteracaoLote() {
         </TabsContent>
 
         <TabsContent value="remover-cclass">
-          <OpCard tipo="remover-cclass" title="Remover CFOP por cClass" icon={Trash2} onProcess={processarRemoverCClass} state={opStates['remover-cclass']} centralCount={centralXmls.length} onCentral={() => void processarBaseCentral(processarRemoverCClass)} onDownload={baixarResultado}>
+          <OpCard tipo="remover-cclass" title="Remover CFOP por cClass" icon={Trash2} onProcess={processarRemoverCClass} state={opStates['remover-cclass']} centralCount={documents.length} onCentral={() => void processarBaseCentral(processarRemoverCClass)} onDownload={baixarResultado}>
             <div>
               <label className="mb-1 block text-xs text-[#94a3b8]">cClass Alvo</label>
               <input type="text" value={cClassAlvo} onChange={e => setCClassAlvo(e.target.value)} placeholder="Ex: SERVICO" className="w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-sm text-[#f1f5f9] placeholder-[#475569] focus:border-[#38bdf8] focus:outline-none" />

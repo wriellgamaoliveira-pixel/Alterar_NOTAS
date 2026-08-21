@@ -28,7 +28,7 @@ function extractIE(xmlContent: string): string {
 
 export default function ExportarXmlPorIE() {
   const { activeModule } = useModule();
-  const { documents } = useBK();
+  const { documents, loadDocumentXmlFiles } = useBK();
   const [status, setStatus] = useState<Status>('idle');
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState('');
@@ -103,13 +103,13 @@ export default function ExportarXmlPorIE() {
   }, [activeModule]);
 
   const processarBaseCentral = useCallback(async () => {
-    const savedXmls = documents.filter((document) => document.rawXml);
+    const savedXmls = await loadDocumentXmlFiles(documents.map((document) => document.id));
     if (!savedXmls.length) { setStatus('error'); setError('As notas antigas ainda não possuem o XML completo. Clique em Sincronizar agora na configuração BK para atualizar a base uma única vez.'); return; }
     const source = new JSZip();
-    savedXmls.forEach((document) => source.file(document.sourceFile.split('/').pop() || `${document.accessKey}.xml`, document.rawXml!));
+    savedXmls.forEach((document) => source.file(document.name.split('/').pop() || `${document.id}.xml`, document.content));
     const blob = await source.generateAsync({ type: 'blob' });
     await processarZip([new File([blob], 'base-central.zip', { type: 'application/zip' })]);
-  }, [documents, processarZip]);
+  }, [documents, loadDocumentXmlFiles, processarZip]);
 
   const baixarZip = () => {
     if (!resultBlob) return;

@@ -1,10 +1,12 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { useModule } from '@/context/ModuleContext';
 import { processXmlFile } from '@/parsers/zipProcessor';
 import UploadDropzone from '@/components/shared/UploadDropzone';
 import type { NotaFiscal } from '@/types/fiscal';
+import type { BKDocument } from '@/types/bk';
 import { useBK } from '@/context/BKContext';
-import { bkDocumentsToNotas } from '@/services/bkFiscalAdapter';
+import { bkDocumentToNotaFiscal } from '@/services/bkFiscalAdapter';
+import { openDanfe } from '@/services/danfe';
 import {
   Building2,
   User,
@@ -13,13 +15,17 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
+const dayLabel = (value: string) => new Date(value).toLocaleDateString('pt-BR');
+
 export default function NotaUnica() {
   const { activeModule } = useModule();
   const { documents } = useBK();
   const [notaAvulsa, setNota] = useState<NotaFiscal | null>(null);
   const [selectedKey, setSelectedKey] = useState('');
-  const centralNotas = useMemo(() => activeModule === 'nfe' ? bkDocumentsToNotas(documents) : [], [activeModule, documents]);
-  const nota = notaAvulsa || centralNotas.find((item) => item.chave === selectedKey) || centralNotas[0] || null;
+  const [results, setResults] = useState<BKDocument[]>([]);
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); const [exactDate, setExactDate] = useState(''); const [term, setTerm] = useState(''); const [limit, setLimit] = useState(50);
+  const selectedDocument = results.find((item) => item.accessKey === selectedKey) || results[0];
+  const nota = notaAvulsa || (selectedDocument ? bkDocumentToNotaFiscal(selectedDocument) : null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
@@ -63,7 +69,9 @@ export default function NotaUnica() {
         <p className="text-sm text-[#94a3b8]">Visualize uma nota já importada na base central, sem carregar o XML novamente.</p>
       </div>
 
-      {centralNotas.length > 0 && <label className="mb-5 block text-sm text-[#94a3b8]">Nota da base central<select value={notaAvulsa ? '' : (nota?.chave || '')} onChange={(event) => { setNota(null); setSelectedKey(event.target.value); }} className="mt-2 w-full rounded-lg border border-[#334155] bg-[#1e293b] px-3 py-2 text-[#f1f5f9]"><option value="" disabled>Selecione uma nota</option>{centralNotas.map((item) => <option key={item.chave || `${item.numero}-${item.serie}`} value={item.chave}>{item.numero} — {item.emitente.nome}</option>)}</select></label>}
+      <section className="mb-5 rounded-xl border border-sky-500/30 bg-[#1e293b] p-4"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[170px_170px_1fr_150px_auto]"><label className="text-xs text-[#94a3b8]">Mês<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Data exata<input type="date" value={exactDate} onChange={(event) => setExactDate(event.target.value)} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Número da nota ou fornecedor<input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Digite para consultar" className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white" /></label><label className="text-xs text-[#94a3b8]">Quantidade<select value={limit} onChange={(event) => setLimit(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-[#334155] bg-[#0f172a] px-3 py-2 text-white">{[10,20,50,100,200,500,1000,2000,5000].map((value) => <option key={value}>{value}</option>)}</select></label><button onClick={() => { const normalized = term.toLowerCase().trim(); setNota(null); setSelectedKey(''); setResults(documents.filter((item) => activeModule === 'nfe' && item.model === '55' && (!month || item.issueDate.startsWith(month)) && (!exactDate || item.issueDate.startsWith(exactDate)) && (!normalized || `${item.number} ${item.issuerName}`.toLowerCase().includes(normalized))).slice(0, limit)); }} className="self-end rounded-lg bg-[#38bdf8] px-4 py-2 font-semibold text-[#0f172a]">Consultar banco</button></div></section>
+
+      {results.length > 0 && <label className="mb-5 block text-sm text-[#94a3b8]">Nota encontrada<select value={notaAvulsa ? '' : (selectedDocument?.accessKey || '')} onChange={(event) => { setNota(null); setSelectedKey(event.target.value); }} className="mt-2 w-full rounded-lg border border-[#334155] bg-[#1e293b] px-3 py-2 text-[#f1f5f9]"><option value="" disabled>Selecione uma nota</option>{results.map((item) => <option key={item.id} value={item.accessKey}>{item.number} — {item.issuerName} — {dayLabel(item.issueDate)}</option>)}</select></label>}
 
       {!nota && (
         <UploadDropzone
@@ -94,12 +102,12 @@ export default function NotaUnica() {
             <h2 className="text-lg font-semibold text-[#f1f5f9]">
               Nota Fiscal {nota.numero} - Série {nota.serie}
             </h2>
-            <button
+            <div className="flex gap-2">{selectedDocument && <><button onClick={() => openDanfe(selectedDocument)} className="rounded-lg bg-[#38bdf8] px-4 py-2 text-sm font-semibold text-[#0f172a]">Visualizar DANFE</button><button onClick={() => openDanfe(selectedDocument, true)} className="rounded-lg bg-[#22c55e] px-4 py-2 text-sm font-semibold text-white">Imprimir</button></>}<button
               onClick={() => { setNota(null); setError(''); setSelectedKey(''); }}
               className="rounded-lg border border-[#334155] bg-[#1e293b] px-4 py-2 text-sm text-[#f1f5f9] transition-colors hover:bg-[#334155]"
             >
               Voltar à base central
-            </button>
+            </button></div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-3">

@@ -1,8 +1,9 @@
 import type { BKStoredState } from '@/types/bk';
 
 const DATABASE_NAME = 'portal-fiscal-bk';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const STORE_NAME = 'settings';
+const XML_STORE_NAME = 'document-xml';
 const STATE_KEY = 'state';
 const DIRECTORY_KEY = 'directory-handle';
 export const BACKUP_FILE_NAME = 'bk-documentos.json';
@@ -29,6 +30,7 @@ function openDatabase() {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME);
+      if (!request.result.objectStoreNames.contains(XML_STORE_NAME)) request.result.createObjectStore(XML_STORE_NAME);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -56,8 +58,41 @@ async function writeValue<T>(key: string, value: T): Promise<void> {
   });
 }
 
-export const loadIndexedState = () => readValue<BKStoredState>(STATE_KEY);
-export const saveIndexedState = (state: BKStoredState) => writeValue(STATE_KEY, state);
+const withoutRawXml = (state: BKStoredState): BKStoredState => ({ ...state, documents: state.documents.map((document) => { const clean = { ...document }; delete clean.rawXml; return clean; }) });
+
+export async function saveDocumentXmls(documents: BKStoredState['documents']) {
+  const withXml = documents.filter((document) => document.rawXml);
+  if (!withXml.length) return;
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(XML_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(XML_STORE_NAME);
+    withXml.forEach((document) => store.put({ name: document.sourceFile, content: document.rawXml }, document.id));
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function loadDocumentXmls(documentIds?: string[]) {
+  const database = await openDatabase();
+  return new Promise<Array<{ id: string; name: string; content: string }>>((resolve, reject) => {
+    const transaction = database.transaction(XML_STORE_NAME, 'readonly');
+    const store = transaction.objectStore(XML_STORE_NAME);
+    const result: Array<{ id: string; name: string; content: string }> = [];
+    const add = (id: string, value?: { name: string; content: string }) => { if (value?.content) result.push({ id, ...value }); };
+    if (documentIds) documentIds.forEach((id) => { const request = store.get(id); request.onsuccess = () => add(id, request.result); });
+    else { const request = store.openCursor(); request.onsuccess = () => { const cursor = request.result; if (cursor) { add(String(cursor.key), cursor.value); cursor.continue(); } }; }
+    transaction.oncomplete = () => { database.close(); resolve(result); };
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+export async function loadIndexedState() {
+  const state = await readValue<BKStoredState>(STATE_KEY);
+  if (state?.documents.some((document) => document.rawXml)) { await saveDocumentXmls(state.documents); await saveIndexedState(state); }
+  return state ? withoutRawXml(state) : undefined;
+}
+export const saveIndexedState = async (state: BKStoredState) => { await saveDocumentXmls(state.documents); await writeValue(STATE_KEY, withoutRawXml(state)); };
 export const loadDirectoryHandle = () => readValue<FileSystemDirectoryHandle>(DIRECTORY_KEY);
 export const saveDirectoryHandle = (handle: FileSystemDirectoryHandle) => writeValue(DIRECTORY_KEY, handle);
 

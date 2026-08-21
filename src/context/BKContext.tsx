@@ -3,11 +3,13 @@ import { classifyCFOP, parseBKXml } from '@/parsers/bkParser';
 import {
   ensureDirectoryPermission,
   listChangedXmlFiles,
+  loadDocumentXmls as loadStoredDocumentXmls,
   loadDirectoryHandle,
   loadIndexedState,
   readPortableBackup,
   requestDirectory,
   saveIndexedState,
+  saveDocumentXmls,
   writePortableBackup,
 } from '@/services/bkIndexedDb';
 import {
@@ -35,6 +37,7 @@ interface BKContextValue extends BKStoredState {
   exportPortableBackup: () => Promise<string>;
   importPortableBackup: () => Promise<string>;
   setAutoSyncMinutes: (minutes: number) => void;
+  loadDocumentXmlFiles: (ids?: string[]) => Promise<Array<{ id: string; name: string; content: string }>>;
 }
 
 const BKContext = createContext<BKContextValue | undefined>(undefined);
@@ -54,10 +57,12 @@ function withRequiredExportCFOPs(config: BKCFOPConfig): BKCFOPConfig {
   };
 }
 
+function withoutRawXml(document: BKDocument): BKDocument { const clean = { ...document }; delete clean.rawXml; return clean; }
+
 function normalizeState(value?: Partial<BKStoredState>): BKStoredState {
   const config = withRequiredExportCFOPs(value?.config || DEFAULT_CFOP_CONFIG);
   const documents = Array.isArray(value?.documents)
-    ? value.documents.map((document) => ({ ...document, category: classifyCFOP(document.cfops, config) }))
+    ? value.documents.map((saved) => { const document = withoutRawXml(saved); return { ...document, category: classifyCFOP(document.cfops, config) }; })
     : [];
   return {
     ...emptyState(), ...value,
@@ -166,8 +171,10 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
   }, [state, storageReady]);
 
   const importBatch = useCallback<BKContextValue['importBatch']>((incomingDocuments, incomingEvents) => {
+    void saveDocumentXmls(incomingDocuments);
     const result = mergeFiscalData(stateRef.current.documents, incomingDocuments, incomingEvents);
-    setState((current) => ({ ...current, documents: result.documents }));
+    const documents = result.documents.map(withoutRawXml);
+    setState((current) => ({ ...current, documents })); stateRef.current = { ...stateRef.current, documents };
     return { imported: result.imported, updated: result.updated };
   }, []);
 
@@ -232,7 +239,9 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
         } catch { ignored += 1; }
       }
       const merged = mergeFiscalData(current.documents, parsedDocuments, parsedEvents);
-      const next: BKStoredState = { ...current, documents: merged.documents, folderName: handle.name, knownFiles: discovered, lastSync: new Date().toISOString() };
+      await saveDocumentXmls(parsedDocuments);
+      const documents = merged.documents.map(withoutRawXml);
+      const next: BKStoredState = { ...current, documents, folderName: handle.name, knownFiles: discovered, lastSync: new Date().toISOString() };
       setState(next); stateRef.current = next; await saveIndexedState(next); await writePortableBackup(handle, next);
       return { ok: true, message: `Sincronização concluída: ${merged.imported} nova(s), ${merged.updated} atualizada(s), ${ignored} ignorada(s).`, analyzed: changed.length, imported: merged.imported, updated: merged.updated, ignored };
     } catch (error) {
@@ -262,6 +271,8 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
     setState((current) => ({ ...current, autoSyncMinutes: Math.max(1, Math.min(1440, minutes || 5)) }));
   }, []);
 
+  const loadDocumentXmlFiles = useCallback<BKContextValue['loadDocumentXmlFiles']>((ids) => loadStoredDocumentXmls(ids), []);
+
   useEffect(() => {
     if (!storageReady || !state.folderName) return;
     const initialSync = window.setTimeout(() => void syncStorageFolder(false), 1_000);
@@ -269,8 +280,8 @@ export function BKProvider({ children }: { children: React.ReactNode }) {
     return () => { window.clearTimeout(initialSync); window.clearInterval(timer); };
   }, [state.autoSyncMinutes, state.folderName, storageReady, syncStorageFolder]);
 
-  const value = useMemo(() => ({ ...state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes }),
-    [state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes]);
+  const value = useMemo(() => ({ ...state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes, loadDocumentXmlFiles }),
+    [state, storageReady, storageBusy, storageError, saveConfigAndReclassify, importBatch, saveDocument, deleteDocuments, selectStorageFolder, syncStorageFolder, exportPortableBackup, importPortableBackup, setAutoSyncMinutes, loadDocumentXmlFiles]);
   return <BKContext.Provider value={value}>{storageReady ? children : <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">Abrindo a base central de documentos…</div>}</BKContext.Provider>;
 }
 
