@@ -9,6 +9,7 @@ import AlteracaoLote from '@/pages/AlteracaoLote';
 import RelatorioCST from '@/pages/RelatorioCST';
 import ExportarXmlPorIE from '@/pages/ExportarXmlPorIE';
 import DashboardApuracao from '@/pages/DashboardApuracao';
+import EntradaDifal from '@/pages/EntradaDifal';
 import { BKProvider } from '@/context/BKContext';
 import BKShell from '@/components/shared/BKShell';
 import BKImport from '@/pages/BKImport';
@@ -31,6 +32,7 @@ function App() {
             <Route path="/relatorio-cst" element={<RelatorioCST />} />
             <Route path="/apuracao" element={<DashboardApuracao />} />
             <Route path="/apuracao/dashboard" element={<DashboardApuracao />} />
+            <Route path="/apuracao/difal" element={<EntradaDifal />} />
             <Route path="/nfe/exportar-xml-por-ie" element={<ExportarXmlPorIE />} />
             <Route path="/nfce/exportar-xml-por-ie" element={<ExportarXmlPorIE />} />
             <Route path="/bk" element={<BKShell />}>

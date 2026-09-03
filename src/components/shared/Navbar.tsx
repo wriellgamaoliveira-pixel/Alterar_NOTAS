@@ -20,6 +20,7 @@ const navLinks = [
   { label: 'Imposto', path: '/resumo-imposto', icon: Receipt },
   { label: 'Alteração Lote', path: '/alteracao-lote', icon: Edit3 },
   { label: 'Apuração', path: '/apuracao/dashboard', icon: BarChart3 },
+  { label: 'Entrada DIFAL', path: '/apuracao/difal', icon: Receipt },
 ];
 
 

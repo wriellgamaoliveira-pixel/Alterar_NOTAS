@@ -65,6 +65,14 @@ export default function Home() {
       color: '#ef4444',
       bgColor: '#ef444415',
     },
+    {
+      title: 'Entrada DIFAL',
+      description: 'Lançamento e cálculo do diferencial de alíquota interestadual',
+      icon: Receipt,
+      path: '/apuracao/difal',
+      color: '#a78bfa',
+      bgColor: '#a78bfa15',
+    },
   ];
 
   const features = [
